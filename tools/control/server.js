@@ -197,6 +197,26 @@ const server = createServer(async (req, res) => {
         return res.end(html);
     }
 
+    // The brand assets, served from the repo rather than inlined: the banner
+    // alone is 493KB, which would dwarf the page and be re-sent on every load.
+    // Allow-listed by name because this serves files off disk.
+    const ASSETS = {
+        "/brand/icon.png": "icon-app-1024.png",
+        "/brand/banner.png": "banner-1360x480.png",
+    };
+    if (ASSETS[url.pathname]) {
+        try {
+            const file = await readFile(join(ROOT, "assets", ASSETS[url.pathname]));
+            res.writeHead(200, {
+                "content-type": "image/png",
+                "cache-control": "max-age=86400",
+            });
+            return res.end(file);
+        } catch {
+            return res.writeHead(404).end("not found");
+        }
+    }
+
     if (url.pathname === "/events") {
         res.writeHead(200, {
             "content-type": "text/event-stream",

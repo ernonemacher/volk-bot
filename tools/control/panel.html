@@ -4,258 +4,326 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Volk Control</title>
+<link rel="icon" href="/brand/icon.png">
 <style>
+  /* Palette sampled from the brand assets rather than chosen: #a31d30 is the
+     wolf in the banner, #dfd9cd the warm off-white it is outlined in, and the
+     greys are the banner's own near-black. The page is dark only: the assets
+     are drawn on black and a light theme would have to fight them. */
   :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --line: #262b36;
-    --ink: #e6e9ef;
-    --dim: #949cad;
-    --ok: #3fb950;
-    --off: #6e7681;
-    --warn: #d29922;
-    --bad: #f85149;
-    --accent: #5865f2;
+    --void:   #0d0d0d;
+    --bg:     #141414;
+    --panel:  #191919;
+    --raised: #1f1f1f;
+    --line:   #2a2a2a;
+    --line-soft: #222;
+
+    --carmine: #a31d30;
+    --carmine-dim: #7a1624;
+    --carmine-glow: rgba(163, 29, 48, .18);
+
+    --ink:  #dfd9cd;
+    --dim:  #8b857c;
+    --dimmer: #5f5a54;
+
+    --ok:   #5a8f4a;
+    --warn: #b8862c;
+    --bad:  #c4392f;
+
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #f4f6fa; --panel: #ffffff; --line: #dfe3ec;
-      --ink: #171a21; --dim: #5c6472;
-    }
-  }
+
   * { box-sizing: border-box; }
+
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font-family: var(--sans); font-size: 14px; line-height: 1.5;
+    margin: 0;
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 40px; }
 
-  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-  h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: .2px; }
-  .sub { color: var(--dim); font-size: 12px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 48px; }
 
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); flex: none; }
-  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
-  .dot.bad { background: var(--bad); }
+  /* --- banner ------------------------------------------------------------ */
+  /* The banner carries the identity, so it leads. Cropped short and faded into
+     the page so it frames the status line instead of competing with it. */
+  .hero {
+    position: relative;
+    margin: 0 0 0;
+    height: 112px;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+    background: var(--void);
+  }
+  /* Anchored right and mirrored: the wolf sits at the banner's left edge, so
+     the title would land on top of its face. Flipped, the art reads as a crest
+     on the far side and the words get clean, dark ground. */
+  /* Scoped to the backdrop only: `.hero img` also matched the crest inside
+     .title, which inherited position:absolute and landed under the wordmark. */
+  .hero > img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover; object-position: left center;
+    transform: scaleX(-1);
+    opacity: .55;
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, var(--void) 0%, rgba(13,13,13,.92) 30%, rgba(13,13,13,.45) 70%, rgba(13,13,13,.25) 100%);
+  }
+  .hero .title {
+    position: absolute; left: 24px; top: 50%; transform: translateY(-50%); z-index: 2;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .hero .crest {
+    width: 54px; height: 54px; border-radius: 50%; flex: none;
+    border: 1px solid color-mix(in srgb, var(--carmine) 45%, transparent);
+  }
+  .hero h1 {
+    margin: 0; font-size: 27px; font-weight: 700; line-height: 1;
+    letter-spacing: 4px; text-transform: uppercase;
+    text-shadow: 0 2px 14px rgba(0,0,0,.9);
+  }
+  .hero .kicker {
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--carmine); font-weight: 700; margin-bottom: 5px;
+    text-shadow: 0 1px 6px rgba(0,0,0,.9);
+  }
+  .hero .words { display: flex; flex-direction: column; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .card h2 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase;
-             letter-spacing: .6px; color: var(--dim); }
-  .card .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  .card .v.small { font-size: 14px; font-weight: 500; word-break: break-all; }
+  /* --- the one line that answers "is it fine?" --------------------------- */
+  .verdict {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--dimmer);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    margin: 20px 0 18px;
+  }
+  .verdict.ok   { border-left-color: var(--ok); }
+  .verdict.warn { border-left-color: var(--warn); }
+  .verdict.bad  { border-left-color: var(--bad); background: linear-gradient(90deg, var(--carmine-glow), var(--panel) 40%); }
 
-  .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .verdict .pulse {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--dimmer); flex: none;
+  }
+  .verdict.ok .pulse   { background: var(--ok);   box-shadow: 0 0 0 4px rgba(90,143,74,.15); animation: breathe 3s ease-in-out infinite; }
+  .verdict.warn .pulse { background: var(--warn); box-shadow: 0 0 0 4px rgba(184,134,44,.15); }
+  .verdict.bad .pulse  { background: var(--bad);  box-shadow: 0 0 0 4px rgba(196,57,47,.18); }
+  @keyframes breathe { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+  @media (prefers-reduced-motion: reduce) { .verdict.ok .pulse { animation: none } }
+
+  .verdict .headline { font-size: 15px; font-weight: 600; }
+  .verdict .detail { color: var(--dim); font-size: 13px; }
+  .verdict .spacer { margin-left: auto; }
+
+  /* --- controls ---------------------------------------------------------- */
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   button {
-    font: inherit; font-weight: 550; color: var(--ink); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600;
+    color: var(--ink); background: var(--raised);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 15px; cursor: pointer;
+    transition: border-color .12s, background .12s;
   }
-  button:hover:not(:disabled) { border-color: var(--dim); }
-  button:disabled { opacity: .4; cursor: default; }
-  button.go { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.stop { color: var(--bad); }
+  button:hover:not(:disabled) { border-color: var(--dim); background: #262626; }
+  button:disabled { opacity: .35; cursor: default; }
+  button.go { background: var(--carmine); border-color: var(--carmine); color: #fff; }
+  button.go:hover:not(:disabled) { background: #b92338; border-color: #b92338; }
+  button.ghost { background: transparent; }
 
-  .guilds { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
-  .guild { display: flex; align-items: center; gap: 10px; background: var(--panel);
-           border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
-  .guild code { font-family: var(--mono); color: var(--dim); font-size: 12px; }
-  .tag { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 99px;
-         border: 1px solid var(--line); color: var(--dim); }
-  .tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-  .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-  .tag.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+  /* --- sections ---------------------------------------------------------- */
+  h2.sec {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--dim);
+    margin: 26px 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+  h2.sec::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  h2.sec .note { font-weight: 500; letter-spacing: .3px; text-transform: none;
+                 color: var(--dimmer); font-size: 11px; }
 
-  .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 18px; }
-  .split section { min-width: 0; }
-  /* Capped and scrollable: the two lists fill at very different rates, and
-     letting the longer one set the page height pushed the log off-screen. */
-  .split .list { max-height: 210px; overflow-y: auto; }
+  /* --- guild cards ------------------------------------------------------- */
+  /* A guild is the unit that matters, so each gets a card carrying everything
+     about it, instead of its facts being spread across a table and a list. */
+  .guilds { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; }
+  .g {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 13px 15px;
+    display: flex; flex-direction: column; gap: 9px;
+  }
+  .g.trouble { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+  .g-top { display: flex; align-items: center; gap: 9px; }
+  .g-chan { font-weight: 650; font-size: 14px; }
+  .g-chan.none { color: var(--dimmer); font-weight: 400; font-style: italic; }
+  .pill {
+    margin-left: auto; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .4px; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--dim);
+  }
+  .pill.ok   { color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .pill.bad  { color: var(--bad);  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+               background: rgba(196,57,47,.08); }
 
-  .item { display: flex; align-items: baseline; gap: 8px; background: var(--panel);
-          border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
-          font-size: 12.5px; margin-bottom: 5px; }
-  .item + .item { margin-top: 0; }
-  .item .scope { font-family: var(--mono); font-size: 11px; color: var(--warn); flex: none; }
-  .item .msg { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .item .when { margin-left: auto; color: var(--dim); font-size: 11px; flex: none;
-                font-variant-numeric: tabular-nums; }
-  .item .times { flex: none; font-size: 11px; color: var(--bad); font-weight: 650; }
-  .item.denied .scope { color: var(--bad); }
-  .item code { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  /* The layer is the thing the panel exists to show, so it is the loudest
+     line on the card, not another grey key/value pair. */
+  .g-layer { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+  .g-layer .none { color: var(--dimmer); font-style: italic; font-family: var(--sans); }
+  .g-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--dim); }
+  .g-facts code { font-family: var(--mono); color: var(--dim); font-size: 11px; }
+  .g-facts .use { color: var(--ink); }
 
-  .guild .meta { color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  /* --- metric strip ------------------------------------------------------ */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
+  .metric {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 9px; padding: 11px 13px;
+  }
+  .metric .k { font-size: 10px; font-weight: 700; letter-spacing: .9px;
+          text-transform: uppercase; color: var(--dimmer); margin-bottom: 3px; }
+  .metric .v { font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .metric .v.quiet { color: var(--dimmer); font-weight: 400; }
+  .metric.alarm { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+  .metric.alarm .v { color: var(--bad); }
+  .metric .sub { font-size: 10.5px; color: var(--dimmer); margin-top: 1px; }
 
-  .loghead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .loghead h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .6px; color: var(--dim); }
-  label.chk { margin-left: auto; color: var(--dim); font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  /* --- lists ------------------------------------------------------------- */
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; }
+  .cols > section { min-width: 0; }
+  .list { max-height: 216px; overflow-y: auto; padding-right: 2px; }
+  .list::-webkit-scrollbar { width: 8px; }
+  .list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 
+  .row2 {
+    display: flex; align-items: baseline; gap: 9px;
+    background: var(--panel); border: 1px solid var(--line-soft);
+    border-radius: 7px; padding: 7px 11px; margin-bottom: 5px; font-size: 12.5px;
+  }
+  .row2 .scope {
+    font-family: var(--mono); font-size: 10.5px; flex: none;
+    color: var(--warn); text-transform: uppercase; letter-spacing: .3px;
+  }
+  .row2.err { border-left: 2px solid var(--carmine-dim); }
+  .row2.err .scope { color: var(--carmine); }
+  .row2 .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row2 .who { font-family: var(--mono); font-size: 10.5px; color: var(--dimmer); }
+  .row2 .when { margin-left: auto; color: var(--dimmer); font-size: 10.5px;
+                flex: none; font-variant-numeric: tabular-nums; }
+  .row2 .times {
+    flex: none; font-size: 10.5px; font-weight: 700; color: var(--bad);
+    background: rgba(196,57,47,.12); padding: 1px 6px; border-radius: 99px;
+  }
+  .row2.denied .scope { color: var(--bad); }
+
+  .empty { color: var(--dimmer); font-style: italic; font-size: 12.5px; padding: 8px 2px; }
+
+  /* --- log --------------------------------------------------------------- */
+  .loghead { display: flex; align-items: center; gap: 10px; }
+  label.chk { margin-left: auto; color: var(--dim); font-size: 11.5px;
+              display: flex; align-items: center; gap: 6px; cursor: pointer;
+              font-weight: 400; letter-spacing: 0; text-transform: none; }
   #log {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    font-family: var(--mono); font-size: 12px; line-height: 1.65;
-    height: 46vh; min-height: 260px; overflow-y: auto; padding: 10px 12px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+    height: 26vh; min-height: 150px; max-height: 320px; overflow-y: auto; padding: 10px 13px;
   }
-  .row { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
-  .row + .row { margin-top: 1px; }
-  .t { color: var(--dim); flex: none; font-variant-numeric: tabular-nums; }
-  .row.err .m { color: var(--bad); }
-  .row.sys .m { color: var(--accent); font-style: italic; }
-  .empty { color: var(--dim); font-style: italic; }
+  #log::-webkit-scrollbar { width: 9px; }
+  #log::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+  .ln { display: flex; gap: 11px; white-space: pre-wrap; word-break: break-word; }
+  .ln .t { color: var(--dimmer); flex: none; font-variant-numeric: tabular-nums; }
+  .ln.err .m { color: var(--bad); }
+  .ln.sys .m { color: var(--carmine); font-style: italic; }
+  .ln .m { color: var(--dim); }
+  .ln.noise .m { color: var(--dimmer); }
+  /* The bot's own lines are the signal; node's warnings and npm noise are not. */
+  .ln.bot .m { color: var(--ink); }
+
+  footer { margin-top: 22px; color: var(--dimmer); font-size: 11px;
+           display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  footer code { font-family: var(--mono); }
 </style>
 </head>
 <body>
+
+<div class="hero">
+  <img src="/brand/banner.png" alt="">
+  <div class="title">
+    <img class="crest" src="/brand/icon.png" alt="">
+    <div class="words">
+      <span class="kicker">Control</span>
+      <h1>Volk</h1>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
 
-  <header>
-    <span class="dot" id="dot"></span>
-    <h1>Volk</h1>
-    <span class="sub" id="sub">conectando ao supervisor…</span>
-  </header>
-
-  <div class="cards">
-    <div class="card"><h2>Estado</h2><div class="v" id="c-state">—</div></div>
-    <div class="card"><h2>No ar há</h2><div class="v" id="c-uptime">—</div></div>
-    <div class="card"><h2>Conta Discord</h2><div class="v small" id="c-tag">—</div></div>
-    <div class="card"><h2>PID</h2><div class="v" id="c-pid">—</div></div>
-    <div class="card"><h2>Erros (sessão)</h2><div class="v" id="c-err">0</div></div>
+  <!-- The whole point of the page in one line: is it fine, and if not, why. -->
+  <div class="verdict" id="verdict">
+    <span class="pulse"></span>
+    <div>
+      <div class="headline" id="v-head">conectando ao supervisor…</div>
+      <div class="detail" id="v-detail">—</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="bar">
+      <button class="go" id="b-start">Ligar</button>
+      <button id="b-stop">Desligar</button>
+      <button id="b-restart">Reiniciar</button>
+    </div>
   </div>
 
-  <!-- Read from volk_db, so these survive a restart and cover the last 24h,
-       unlike the counters above which only know this session. -->
-  <div class="cards">
-    <div class="card"><h2>Erros 24h</h2><div class="v" id="d-err">—</div></div>
-    <div class="card"><h2>Cliques 24h</h2><div class="v" id="d-clicks">—</div></div>
-    <div class="card"><h2>Operadores 24h</h2><div class="v" id="d-ops">—</div></div>
-    <div class="card"><h2>Renders 24h</h2><div class="v" id="d-renders">—</div></div>
-    <div class="card"><h2>Render típico</h2><div class="v" id="d-p50">—</div></div>
-  </div>
-
-  <div class="bar">
-    <button class="go" id="b-start">Ligar</button>
-    <button class="stop" id="b-stop">Desligar</button>
-    <button id="b-restart">Reiniciar</button>
-    <button id="b-clear">Limpar logs</button>
-  </div>
-
+  <h2 class="sec">Guilds <span class="note" id="g-note"></span></h2>
   <div class="guilds" id="guilds"></div>
 
-  <div class="split">
+  <h2 class="sec">Atividade <span class="note">últimas 24 horas</span></h2>
+  <div class="metrics" id="metrics"></div>
+
+  <div class="cols">
     <section>
-      <div class="loghead"><h2>Falhas recentes (7 dias)</h2></div>
-      <div class="list" id="errors"><div class="empty">nenhuma</div></div>
+      <h2 class="sec">Falhas <span class="note">7 dias, agrupadas</span></h2>
+      <div class="list" id="errors"><div class="empty">—</div></div>
     </section>
     <section>
-      <div class="loghead"><h2>Últimos cliques</h2></div>
-      <div class="list" id="clicks"><div class="empty">nenhum ainda</div></div>
+      <h2 class="sec">Quem usou <span class="note">cliques recentes</span></h2>
+      <div class="list" id="clicks"><div class="empty">—</div></div>
     </section>
   </div>
 
-  <div class="loghead">
-    <h2>Log ao vivo</h2>
-    <span class="sub" id="dbpath"></span>
+  <h2 class="sec loghead">
+    Log ao vivo
     <label class="chk"><input type="checkbox" id="follow" checked> acompanhar</label>
-  </div>
+  </h2>
   <div id="log"><div class="empty">sem linhas ainda</div></div>
+
+  <footer>
+    <span id="f-proc">—</span>
+    <span id="f-db">—</span>
+    <button class="ghost" id="b-clear" style="margin-left:auto;font-size:11px;padding:4px 10px">Limpar log</button>
+  </footer>
 
 </div>
 
 <script>
   const $ = (id) => document.getElementById(id);
   const log = $("log");
-  let empty = true;
+  let logEmpty = true;
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   const hhmmss = (ms) => {
     const s = Math.floor(ms / 1000);
-    const h = String(Math.floor(s / 3600)).padStart(2, "0");
-    const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-    return `${h}:${m}:${String(s % 60).padStart(2, "0")}`;
+    return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+      .map((n) => String(n).padStart(2, "0")).join(":");
   };
-
-  let startedAt = null;
-  setInterval(() => {
-    $("c-uptime").textContent = startedAt ? hhmmss(Date.now() - startedAt) : "—";
-  }, 1000);
-
-  const GUILD_TAG = {
-    ok:          ["ok", "publicando"],
-    unbound:     ["warn", "sem canal"],
-    unreachable: ["bad", "canal inacessível"],
-    failing:     ["bad", "falhando"],
-  };
-
-  function paint(s) {
-    lastState = s;
-    startedAt = s.startedAt;
-    $("dot").className = "dot" + (s.running ? " on" : s.lastExit ? " bad" : "");
-    $("c-state").textContent = s.running ? "no ar" : "parado";
-    $("c-tag").textContent = s.tag ?? "—";
-    $("c-pid").textContent = s.pid ?? "—";
-    $("c-err").textContent = s.errors;
-    $("c-err").style.color = s.errors ? "var(--bad)" : "";
-
-    $("sub").textContent = s.running
-      ? "supervisor no ar, bot rodando"
-      : s.lastExit
-        ? `parado (${s.lastExit.signal ?? "código " + s.lastExit.code})`
-        : "supervisor no ar, bot parado";
-
-    $("b-start").disabled = s.running;
-    $("b-stop").disabled = !s.running;
-
-    // The log says whether the panel is publishing; the database says what it
-    // is publishing and whether anyone is using it. Union of both, keyed by id,
-    // so a guild the bot has not reached yet this session still shows up with
-    // its stored configuration.
-    const box = $("guilds");
-    box.innerHTML = "";
-    const ids = new Set([...s.guilds.map((g) => g.id), ...dbGuilds.keys()]);
-
-    for (const id of ids) {
-      const live = s.guilds.find((g) => g.id === id);
-      const db = dbGuilds.get(id);
-      const [cls, text] = live ? (GUILD_TAG[live.state] ?? ["", live.state]) : ["", "sem contato"];
-
-      const bits = [];
-      if (db?.serverId) bits.push(`servidor <code>${escapeHtml(db.serverId)}</code>`);
-      if (db?.layer) bits.push(escapeHtml(db.layer));
-      if (db?.auto) bits.push(`auto ${db.auto}s`);
-      if (db?.language) bits.push(db.language);
-      if (db?.clicks24h) bits.push(`${db.clicks24h} cliques 24h`);
-      if (db?.logChannelId) bits.push("log on");
-
-      const el = document.createElement("div");
-      el.className = "guild";
-      el.innerHTML =
-        `<span>${live?.channel ? "#" + escapeHtml(live.channel) : "<span class=\"empty\">nenhum canal</span>"}</span>` +
-        `<code>${escapeHtml(id)}</code>` +
-        (bits.length ? `<span class="meta">${bits.join(" · ")}</span>` : "") +
-        `<span class="tag ${cls}">${escapeHtml(text)}</span>`;
-      box.appendChild(el);
-    }
-  }
-
-  const escapeHtml = (s) =>
-    String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-
-  function addLine(e) {
-    if (empty) { log.innerHTML = ""; empty = false; }
-    const at = new Date(e.at).toLocaleTimeString("pt-BR", { hour12: false });
-    const row = document.createElement("div");
-    row.className = "row " + e.stream;
-    row.innerHTML = `<span class="t">${at}</span><span class="m">${escapeHtml(e.line)}</span>`;
-    log.appendChild(row);
-    while (log.children.length > 600) log.removeChild(log.firstChild);
-    if ($("follow").checked) log.scrollTop = log.scrollHeight;
-  }
-
-  const post = (path) => fetch(path, { method: "POST" });
-  $("b-start").onclick = () => post("/start");
-  $("b-stop").onclick = () => post("/stop");
-  $("b-restart").onclick = () => post("/restart");
-  $("b-clear").onclick = () => { log.innerHTML = '<div class="empty">sem linhas ainda</div>'; empty = true; };
-
-  // --- what the bot recorded, as opposed to what it printed -----------------
 
   const ago = (ms) => {
     const s = Math.round((Date.now() - ms) / 1000);
@@ -265,72 +333,230 @@
     return `${Math.floor(s / 86400)}d`;
   };
 
+  let state = null;   // from the log (SSE)
+  let data = null;    // from the database (polled)
+
+  // --- uptime ticks on its own so the verdict line stays live between polls
+  setInterval(() => {
+    if (state?.running && state.startedAt) {
+      $("f-proc").textContent = `pid ${state.pid} · no ar há ${hhmmss(Date.now() - state.startedAt)}`;
+    }
+  }, 1000);
+
+  // --- the verdict -------------------------------------------------------
+  /**
+   * One sentence, in plain words, ranked by what would actually ruin the day:
+   * the bot being down beats a guild failing, which beats an upstream blip.
+   * Reading ten numbers to work this out was the old page's real failure.
+   */
+  function verdict() {
+    const el = $("verdict");
+    if (!state) return;
+
+    if (!state.running) {
+      el.className = "verdict";
+      $("v-head").textContent = "Bot parado";
+      $("v-detail").textContent = state.lastExit
+        ? `saiu com ${state.lastExit.signal ?? "código " + state.lastExit.code} ${ago(state.lastExit.at)}`
+        : "nada publicando no Discord";
+      return;
+    }
+
+    const failing = (data?.guilds ?? []).filter((g) => g.trouble === "refresh" || g.trouble === "render");
+    const offline = (data?.guilds ?? []).filter((g) => g.trouble === "offline" || g.trouble === "seeding");
+    const errs = data?.health?.errors24h ?? 0;
+
+    if (failing.length) {
+      el.className = "verdict bad";
+      $("v-head").textContent = `${failing.length} guild(s) falhando`;
+      $("v-detail").textContent = "o painel não está atualizando onde importa — veja as falhas abaixo";
+      return;
+    }
+    if (errs > 0) {
+      el.className = "verdict warn";
+      $("v-head").textContent = `No ar, com ${errs} erro(s) em 24h`;
+      $("v-detail").textContent = "publicando normalmente, mas algo falhou no caminho";
+      return;
+    }
+    el.className = "verdict ok";
+    $("v-head").textContent = `No ar como ${state.tag ?? "…"}`;
+    $("v-detail").textContent = offline.length
+      ? `tudo certo — ${offline.length} servidor(es) vigiado(s) sem partida agora`
+      : "nenhum erro nas últimas 24 horas";
+  }
+
+  // --- guild cards -------------------------------------------------------
+  const PILL = {
+    ok:          ["ok", "publicando"],
+    unbound:     ["warn", "sem canal"],
+    unreachable: ["bad", "canal inacessível"],
+    failing:     ["bad", "falhando"],
+  };
+
+  function paintGuilds() {
+    const box = $("guilds");
+    const live = state?.guilds ?? [];
+    const db = new Map((data?.guilds ?? []).map((g) => [g.id, g]));
+    const ids = [...new Set([...live.map((g) => g.id), ...db.keys()])];
+
+    $("g-note").textContent = ids.length ? `${ids.length} servidor(es) Discord` : "";
+
+    if (!ids.length) {
+      box.innerHTML = '<div class="empty">nenhuma guild conhecida ainda</div>';
+      return;
+    }
+
+    box.innerHTML = ids.map((id) => {
+      const l = live.find((g) => g.id === id);
+      const d = db.get(id);
+      const [cls, text] = l ? (PILL[l.state] ?? ["", l.state]) : ["", "sem contato"];
+      // Only the bot's own failures make a card alarming. `offline` and
+      // `seeding` mean the Squad server has no match on, which is the game's
+      // normal state between rounds and says nothing about the bot's health.
+      const bad = cls === "bad" || d?.trouble === "refresh" || d?.trouble === "render" || d?.trouble === "mount";
+
+      const facts = [];
+      if (d?.serverId) facts.push(`servidor <code>${esc(d.serverId)}</code>`);
+      if (d?.auto) facts.push(`auto ${d.auto}s`);
+      if (d?.language) facts.push(esc(d.language));
+      if (d?.pinned) facts.push(`${d.pinned} fixado(s)`);
+      if (d?.logChannelId) facts.push("log ligado");
+      if (d?.clicks24h) facts.push(`<span class="use">${d.clicks24h} cliques 24h</span>`);
+
+      return `<div class="g${bad ? " trouble" : ""}">` +
+        `<div class="g-top">` +
+          `<span class="g-chan${l?.channel ? "" : " none"}">` +
+            (l?.channel ? "#" + esc(l.channel) : "sem canal") +
+          `</span>` +
+          `<span class="pill ${cls}">${esc(text)}</span>` +
+        `</div>` +
+        `<div class="g-layer">` +
+          (d?.layer
+            ? esc(d.layer) + (d.layerAt ? ` <span class="who">· ${ago(d.layerAt)}</span>` : "")
+            : `<span class="none">${d?.trouble === "offline" ? "servidor sem partida" : "nenhum layer ainda"}</span>`) +
+        `</div>` +
+        (facts.length ? `<div class="g-facts">${facts.join("<span style='color:var(--line)'>·</span>")}</div>` : "") +
+      `</div>`;
+    }).join("");
+  }
+
+  // --- metrics -----------------------------------------------------------
+  function paintMetrics() {
+    const h = data?.health;
+    const card = (k, v, opts = {}) =>
+      `<div class="metric${opts.alarm ? " alarm" : ""}">` +
+        `<div class="k">${k}</div>` +
+        `<div class="v${opts.quiet ? " quiet" : ""}">${v}</div>` +
+        (opts.sub ? `<div class="sub">${opts.sub}</div>` : "") +
+      `</div>`;
+
+    // "—" and "0" are different claims: no database at all versus nothing
+    // happened. The old page showed 0 for both.
+    const n = (x) => (h ? x : "—");
+    const quiet = !h;
+
+    $("metrics").innerHTML =
+      card("Erros", n(h?.errors24h ?? 0), { alarm: (h?.errors24h ?? 0) > 0, quiet }) +
+      card("Cliques", n(h?.clicks24h ?? 0), { quiet: quiet || !h?.clicks24h }) +
+      card("Operadores", n(h?.operators24h ?? 0), { quiet: quiet || !h?.operators24h }) +
+      card("Renders", n(h?.renders24h ?? 0), { quiet: quiet || !h?.renders24h }) +
+      card("Render típico",
+           h?.renderP50 != null ? (h.renderP50 / 1000).toFixed(1) + "s" : "—",
+           { quiet: h?.renderP50 == null, sub: h?.renderP50 != null ? "mediana" : "" });
+  }
+
+  // --- lists -------------------------------------------------------------
   const CLICK_LABEL = {
     flag: "confirmou objetivo", undo: "desfez", reset: "limpou",
     server: "trocou servidor", perspective: "trocou lado", refresh: "atualizou",
   };
 
-  function fill(el, rows, render, empty) {
-    el.innerHTML = rows.length
-      ? rows.map(render).join("")
-      : `<div class="empty">${empty}</div>`;
+  function paintLists() {
+    const errs = data?.errors ?? [];
+    $("errors").innerHTML = errs.length
+      ? errs.map((e) =>
+          `<div class="row2 err">` +
+            `<span class="scope">${esc(e.scope ?? "?")}</span>` +
+            `<span class="msg" title="${esc(e.detail ?? "")}">${esc(e.detail ?? "")}</span>` +
+            (e.n > 1 ? `<span class="times">${e.n}×</span>` : "") +
+            `<span class="when">${ago(e.last_at)}</span>` +
+          `</div>`).join("")
+      : '<div class="empty">nenhuma falha em 7 dias</div>';
+
+    const clicks = data?.clicks ?? [];
+    $("clicks").innerHTML = clicks.length
+      ? clicks.map((c) =>
+          `<div class="row2${c.denied ? " denied" : ""}">` +
+            `<span class="scope">${c.denied ? "negado" : "ok"}</span>` +
+            `<span class="msg">${esc(CLICK_LABEL[c.action] ?? c.action)}</span>` +
+            (c.user_id ? `<span class="who">${esc(c.user_id)}</span>` : "") +
+            `<span class="when">${ago(c.at)}</span>` +
+          `</div>`).join("")
+      : '<div class="empty">ninguém usou o painel ainda</div>';
   }
 
-  async function poll() {
-    let d;
-    try {
-      d = await fetch("/inspect").then((r) => r.json());
-    } catch {
-      return; // supervisor down; the SSE handler already says so
+  function paintFooter() {
+    if (!state?.running) {
+      $("f-proc").textContent = state?.lastExit ? "processo parado" : "processo parado";
     }
-
-    const h = d.health;
-    // A missing database is the normal state of a fresh clone, so the cards say
-    // "—" rather than zero: no data and no activity are different things.
-    $("d-err").textContent = h ? h.errors24h : "—";
-    $("d-err").style.color = h?.errors24h ? "var(--bad)" : "";
-    $("d-clicks").textContent = h ? h.clicks24h : "—";
-    $("d-ops").textContent = h ? h.operators24h : "—";
-    $("d-renders").textContent = h ? h.renders24h : "—";
-    $("d-p50").textContent = h?.renderP50 != null ? `${(h.renderP50 / 1000).toFixed(1)}s` : "—";
-
-    $("dbpath").textContent = d.db.present
-      ? `${h?.events ?? 0} eventos registrados`
+    $("f-db").textContent = data?.db?.present
+      ? `${data.health?.events ?? 0} eventos · ${data.db.path.replace(/^.*\//, "")}`
       : "sem banco ainda";
-
-    fill($("errors"), d.errors, (e) =>
-      `<div class="item">` +
-        `<span class="scope">${escapeHtml(e.scope ?? "?")}</span>` +
-        `<span class="msg" title="${escapeHtml(e.detail ?? "")}">${escapeHtml(e.detail ?? "")}</span>` +
-        (e.n > 1 ? `<span class="times">${e.n}x</span>` : "") +
-        `<span class="when">${ago(e.last_at)}</span>` +
-      `</div>`, "nenhuma falha em 7 dias");
-
-    fill($("clicks"), d.clicks, (c) =>
-      `<div class="item${c.denied ? " denied" : ""}">` +
-        `<span class="scope">${c.denied ? "negado" : "ok"}</span>` +
-        `<span class="msg">${escapeHtml(CLICK_LABEL[c.action] ?? c.action)}` +
-          (c.user_id ? ` <code>${escapeHtml(c.user_id)}</code>` : "") +
-        `</span>` +
-        `<span class="when">${ago(c.at)}</span>` +
-      `</div>`, "ninguém usou o painel ainda");
-
-    dbGuilds = new Map(d.guilds.map((g) => [g.id, g]));
-    if (lastState) paint(lastState);
   }
 
-  let dbGuilds = new Map();
-  let lastState = null;
+  const repaint = () => { verdict(); paintGuilds(); paintMetrics(); paintLists(); paintFooter(); };
+
+  // --- sources -----------------------------------------------------------
+  async function poll() {
+    try {
+      data = await fetch("/inspect").then((r) => r.json());
+    } catch {
+      return; // supervisor unreachable; the SSE handler already says so
+    }
+    repaint();
+  }
   poll();
   setInterval(poll, 5000);
 
+  function addLine(e) {
+    if (logEmpty) { log.innerHTML = ""; logEmpty = false; }
+    const at = new Date(e.at).toLocaleTimeString("pt-BR", { hour12: false });
+    const isBot = /^\[(BOT|TELEMETRY|STORE)\]/.test(e.line);
+    // Node writes its own warnings to stderr, so the stream alone would paint
+    // "ExperimentalWarning: Importing JSON modules" in the same red as a real
+    // failure. Everything the bot itself prints is tagged, so anything
+    // untagged on stderr is the runtime talking, not the bot.
+    const noise = e.stream === "err" && !isBot && /^\(node:\d+\)|^\(Use `node/.test(e.line);
+    const el = document.createElement("div");
+    el.className = "ln " + (noise ? "noise" : e.stream) + (isBot ? " bot" : "");
+    el.innerHTML = `<span class="t">${at}</span><span class="m">${esc(e.line)}</span>`;
+    log.appendChild(el);
+    while (log.children.length > 600) log.removeChild(log.firstChild);
+    if ($("follow").checked) log.scrollTop = log.scrollHeight;
+  }
+
+  const post = (p) => fetch(p, { method: "POST" });
+  $("b-start").onclick = () => post("/start");
+  $("b-stop").onclick = () => post("/stop");
+  $("b-restart").onclick = () => post("/restart");
+  $("b-clear").onclick = () => {
+    log.innerHTML = '<div class="empty">sem linhas ainda</div>';
+    logEmpty = true;
+  };
+
   function connect() {
     const es = new EventSource("/events");
-    es.addEventListener("state", (m) => paint(JSON.parse(m.data)));
+    es.addEventListener("state", (m) => {
+      state = JSON.parse(m.data);
+      $("b-start").disabled = state.running;
+      $("b-stop").disabled = !state.running;
+      repaint();
+    });
     es.addEventListener("line", (m) => addLine(JSON.parse(m.data)));
     es.onerror = () => {
-      $("sub").textContent = "supervisor fora do ar (feche a janela ou rode Volk.command de novo)";
-      $("dot").className = "dot bad";
+      $("verdict").className = "verdict bad";
+      $("v-head").textContent = "Supervisor fora do ar";
+      $("v-detail").textContent = "rode Volk.command de novo para voltar";
     };
   }
   connect();
