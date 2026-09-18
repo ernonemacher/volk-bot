@@ -159,8 +159,26 @@
   }
   .g.trouble { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   .g-top { display: flex; align-items: center; gap: 9px; }
-  .g-chan { font-weight: 650; font-size: 14px; }
-  .g-chan.none { color: var(--dimmer); font-weight: 400; font-style: italic; }
+  /* The guild's Discord icon. Fixed square so a card's height does not depend
+     on whether the image loaded, and no-referrer above because this is a
+     loopback page asking cdn.discordapp.com for an asset. */
+  .g-icon {
+    width: 28px; height: 28px; flex: none;
+    border-radius: 8px; object-fit: cover;
+    background: var(--bg); border: 1px solid var(--line);
+  }
+  .g-icon.ph {
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; letter-spacing: .3px;
+    color: var(--dim);
+  }
+  .g-id { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .g-name {
+    font-weight: 650; font-size: 14px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .g-chan { font-size: 11.5px; color: var(--dim); font-family: var(--mono); }
+  .g-chan.none { color: var(--dimmer); font-style: italic; }
   .pill {
     margin-left: auto; font-size: 10.5px; font-weight: 600;
     letter-spacing: .4px; text-transform: uppercase;
@@ -426,10 +444,25 @@
       if (d?.logChannelId) facts.push("log ligado");
       if (d?.clicks24h) facts.push(`<span class="use">${d.clicks24h} cliques 24h</span>`);
 
+      // The guild's own name and icon, once the bot has mounted there. Before
+      // that there is only the id, which is what this used to show and is
+      // still the honest fallback. Initials stand in for a guild with no icon.
+      const gname = d?.name || null;
+      const initials = (gname ?? id)
+        .split(/[\s-]+/).filter(Boolean).slice(0, 2)
+        .map((w) => w[0]).join("").toUpperCase();
+      const badge = d?.icon
+        ? `<img class="g-icon" src="${esc(d.icon)}" alt="" referrerpolicy="no-referrer">`
+        : `<span class="g-icon ph">${esc(initials)}</span>`;
+
       return `<div class="g${bad ? " trouble" : ""}">` +
         `<div class="g-top">` +
-          `<span class="g-chan${l?.channel ? "" : " none"}">` +
-            (l?.channel ? "#" + esc(l.channel) : "sem canal") +
+          badge +
+          `<span class="g-id">` +
+            `<span class="g-name">${esc(gname ?? "guild " + id)}</span>` +
+            `<span class="g-chan${l?.channel ? "" : " none"}">` +
+              (l?.channel ? "#" + esc(l.channel) : "sem canal") +
+            `</span>` +
           `</span>` +
           `<span class="pill ${cls}">${esc(text)}</span>` +
         `</div>` +

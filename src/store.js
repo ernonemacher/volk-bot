@@ -211,6 +211,43 @@ export async function saveGuild(guildId, config) {
     return config;
 }
 
+/**
+ * Records what a guild currently *is* (its name and icon), as opposed to how
+ * it is configured.
+ *
+ * Kept apart from `saveGuild` on purpose. These are observed from Discord on
+ * every mount rather than chosen by an admin, and they change without anyone
+ * touching the bot. Writing them through `saveGuild` would mean handing it a
+ * whole config object just to update a name, and a caller holding a slightly
+ * stale config would silently revert a rename. This merges the two fields into
+ * whatever record is on disk and leaves the rest alone.
+ *
+ * Only useful to the control panel, which otherwise has ids and nothing else to
+ * show for a guild.
+ */
+export async function saveGuildIdentity(guildId, { name, icon }) {
+    const db = connect();
+    const identity = { name: name ?? null, icon: icon ?? null };
+
+    if (!db) {
+        memory.guilds.set(guildId, { ...(memory.guilds.get(guildId) ?? {}), ...identity });
+        return;
+    }
+    try {
+        const row = db.prepare("SELECT record FROM guilds WHERE guild_id = ?").get(guildId);
+        const record = row ? JSON.parse(row.record) : {};
+        // Nothing changed: skip the write. Mounts are frequent and this runs on
+        // every one of them.
+        if (record.name === identity.name && record.icon === identity.icon) return;
+        db.prepare(
+            "INSERT INTO guilds(guild_id, record) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET record = excluded.record",
+        ).run(guildId, JSON.stringify({ ...record, ...identity }));
+    } catch (e) {
+        // A name on a panel is not worth failing a mount over.
+        console.error(`[STORE] guild ${guildId} identity failed: ${e.message}`);
+    }
+}
+
 // --- discovery -------------------------------------------------------------
 
 export async function readDiscovery() {

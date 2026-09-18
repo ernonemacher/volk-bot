@@ -182,6 +182,11 @@ export function guilds() {
             const seen = lastLayer.get({ g: guild_id });
             return {
                 id: guild_id,
+                // What Discord calls this guild, recorded by the bot on mount.
+                // Absent until it has mounted once, so the page falls back to
+                // the id rather than showing nothing.
+                name: cfg.name ?? null,
+                icon: cfg.icon ?? null,
                 channelId: cfg.channelId ?? null,
                 serverId: cfg.serverId ?? null,
                 language: cfg.language ?? null,
