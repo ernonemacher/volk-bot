@@ -23,12 +23,15 @@ Environment=MALLOC_ARENA_MAX=2
 # Persisted state, on a directory systemd creates and keeps writable even with
 # the hardening below. The repo itself stays read-only.
 StateDirectory=volk
-Environment=SQUADCALC_STORE=/var/lib/volk/config.json
 
-# Usage and error events. Beside the config on the same writable directory, so
-# a backup of /var/lib/volk carries both. Holds Discord user ids, pruned after
-# TELEMETRY_RETENTION_DAYS (default 90).
+# Guild configuration and usage events, in one SQLite file. Holds Discord user
+# ids; events are pruned after TELEMETRY_RETENTION_DAYS (default 90), while
+# configuration is never pruned.
 Environment=VOLK_DB=/var/lib/volk/volk_db
+
+# Only read, and only once: an upgrade from a build that stored its state as
+# JSON imports this file and renames it to .migrated.
+Environment=SQUADCALC_STORE=/var/lib/volk/config.json
 
 # The bot listens on nothing and writes one file, so it can afford to be
 # locked down.

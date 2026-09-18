@@ -127,23 +127,26 @@ messages already in the channel instead of stacking new ones.
 
 ## State
 
-Everything the bot remembers lives in one JSON file at
-`/var/lib/volk/config.json`: which channel each guild publishes to, the watched
-server, pinned servers, language, refresh interval and roles. systemd creates
-that directory and keeps it writable while the rest of the filesystem is read
-only to the service.
+Everything the bot remembers lives in one SQLite file at `/var/lib/volk/volk_db`:
+which channel each guild publishes to, the watched server, pinned servers,
+language, refresh interval and roles, plus the usage and error events
+`/volk stats` reads. systemd creates that directory and keeps it writable while
+the rest of the filesystem is read only to the service.
 
-Beside it sits `volk_db`, the SQLite file holding usage and error events, which
-is what `/volk stats` reads. It grows with activity rather than with time: a
-busy guild writes on the order of a few thousand rows a day, a few megabytes a
-year, and a daily sweep drops anything past `TELEMETRY_RETENTION_DAYS`
-(default 90).
-
-Both live in the same directory, so one copy takes both:
+It grows with activity rather than with time: a busy guild writes on the order
+of a few thousand rows a day, a few megabytes a year, and a daily sweep drops
+events past `TELEMETRY_RETENTION_DAYS` (default 90). The sweep only ever touches
+events; configuration is never pruned.
 
 ```bash
 sudo cp -a /var/lib/volk ~/volk-backup
 ```
+
+**Upgrading from a build that used `config.json`:** nothing to do. The first
+boot imports it, logs `[STORE] imported N guild(s)`, and renames it to
+`config.json.migrated`. Keep that file until you have confirmed the panels came
+back in the right channels; it is the only way to check the import field by
+field. `SQUADCALC_STORE` still names where to look for it.
 
 The database holds Discord user ids, so treat that backup as personal data:
 keep it off shared storage, and see [What it records](../README.md#what-it-records).

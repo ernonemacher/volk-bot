@@ -51,7 +51,10 @@ src/layer.js        /api/get/layer            -> flags, projector, gamemode rule
 src/lane-solver.js  layer payload             -> route enumeration and probabilities
 src/render-map.js   basemap + SVG overlay     -> JPEG buffer
 src/panel.js        panel state               -> embed + components
-src/store.js        config.json               -> per-guild persisted state
+src/store.js        volk_db                   -> per-guild persisted state
+src/telemetry.js    volk_db                   -> usage and error events
+src/stats.js        volk_db                   -> aggregates for /volk stats
+src/reporter.js     failures                  -> a Discord log channel
 src/permissions.js  roles                     -> admin / operator
 src/bot.js          Discord client            -> orchestrates the above
 src/commands.js     /volk slash command       -> admin config, writes the store
@@ -100,7 +103,15 @@ It enumerates every route from main to main up front (capped at `MAX_ROUTES` 200
 
 Two levels in `permissions.js`: **admin** (settings that outlive the match; defaults to Manage Server) and **operator** (driving the panel; open to everyone unless an admin names at least one operator role). Discord gates the slash command, but nothing gates the panel's buttons, so `canOperate` is the only check there.
 
-State lives in `config.json` (or `SQUADCALC_STORE`), written atomically through a temp file. Always go through `guildConfig`/`saveGuild`/`readDiscovery`/`saveDiscovery`; never write the file directly. The store is split three ways on purpose: `discovery` is global ("which servers are in a match right now" has one answer), `defaults` is what a new guild starts from, `guilds` is per guild. A version 1 file (single-guild, top-level settings) migrates into `defaults`.
+State lives in `volk_db` (SQLite, moved with `VOLK_DB`), which also holds the usage events. Always go through `guildConfig`/`saveGuild`/`readDiscovery`/`saveDiscovery`; never touch the tables directly. The store is split three ways on purpose: `discovery` is global ("which servers are in a match right now" has one answer), `defaults` is what a new guild starts from, `guilds` is per guild. A version 1 file (single-guild, top-level settings) migrates into `defaults`.
+
+An existing `config.json` is imported on first boot and renamed to `.migrated`, kept as a backup rather than deleted: if the import read a field wrong, that file is the only way to notice. The import is guarded by a `migrated` marker row, not by the file's absence, so re-running it cannot undo later changes. **If SQLite cannot be opened the store serves defaults from memory instead of throwing** — telemetry can afford to vanish, configuration cannot, and a store that throws takes every guild's panel down.
+
+### Telemetry
+
+One wide `events` table, written through `track`/`trackError`/`timed`, all of which swallow their own errors: a full disk costs the metrics and nothing else. Two traps worth knowing. `laneState` has a degenerate branch that zeroes `stepCount` and `lanes`, so anything averaging lane numbers must filter on the recorded `solver_ok`. And the retention sweep (`purge`) must only ever touch `events`, because configuration now lives in the same file.
+
+**The existing `[BOT]` log lines are an interface, not a detail**: `tools/control/server.js` recovers the bot's state by grepping five of them (`connected as`, `guild N: panel on #`, `no channel bound`, `channel unreachable`, `refresh failed for guild N`). Telemetry writes beside them and never replaces one; changing their wording breaks the Mac panel.
 
 Server list is two sources merged: **pinned** ids (always shown, even offline or seeding) and **discovery** (in-match servers above a player threshold). Auto-refresh defaults to 60 s, clamped to `AUTO_MIN`/`AUTO_MAX` (30–3600), sized against upstream freshness of roughly 30 s for actively polled servers.
 

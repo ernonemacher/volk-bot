@@ -10,19 +10,30 @@
  *              its roles. None of these can be shared, which is the whole
  *              reason this file exists.
  *
- * Backed by a JSON file. Free hosting usually gives an ephemeral disk, so this
- * will need a real store before the bot runs anywhere but a machine with a
- * volume. The surface here is deliberately tiny, three reads and two writes, so
- * that swap touches this file and nothing else.
+ * Backed by the same SQLite file the usage events go to. The JSON file this
+ * replaced was written whole on every change, which is fine for a handful of
+ * guilds and stops being fine well before it breaks: one torn write loses every
+ * guild's channel binding at once.
+ *
+ * The four functions below kept their signatures, including `async` ones that
+ * no longer await anything. better-sqlite3 is synchronous, but changing the
+ * shape would have meant touching every caller for no gain, and a promise that
+ * resolves immediately costs nothing.
+ *
+ * An existing `config.json` is imported once, on first use, and then left alone
+ * on disk. It is not deleted: if this migration read a field wrong, the file it
+ * came from is the only way to notice.
  */
 
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { database } from "./telemetry.js";
+
 // The repo root, one level up from src/, is where config.json lives.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const STORE_PATH = process.env.SQUADCALC_STORE ?? join(ROOT, "config.json");
+const LEGACY_PATH = process.env.SQUADCALC_STORE ?? join(ROOT, "config.json");
 
 const DEFAULTS = {
     pinned: [
@@ -46,80 +57,194 @@ const DEFAULTS = {
     logChannelId: null,
 };
 
-const EMPTY = {
-    version: 2,
-    discovery: { active: true, minPlayers: 50, count: 8 },
-    defaults: structuredClone(DEFAULTS),
-    guilds: {},
-};
-
-let cache = null;
+const DISCOVERY = { active: true, minPlayers: 50, count: 8 };
 
 /**
+ * Last-resort store for when SQLite could not be opened.
+ *
+ * Telemetry can afford to disappear; configuration cannot. Without this a
+ * database that fails to open would make `guildConfig` throw on every refresh
+ * and take every panel down, which is precisely the failure this phase was
+ * separated out to avoid.
+ */
+const memory = { guilds: new Map(), settings: new Map() };
+
+let ready = false;
+
+/** Opens the database and imports `config.json` the first time. */
+function connect() {
+    const db = database();
+    if (db && !ready) {
+        ready = true;
+        importLegacy(db);
+    }
+    return db;
+}
+
+// --- settings --------------------------------------------------------------
+
+function readSetting(key, fallback) {
+    const db = connect();
+    if (!db) return memory.settings.get(key) ?? structuredClone(fallback);
+    try {
+        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+        return row ? JSON.parse(row.value) : structuredClone(fallback);
+    } catch (e) {
+        console.error(`[STORE] read ${key} failed: ${e.message}`);
+        return structuredClone(fallback);
+    }
+}
+
+function writeSetting(key, value) {
+    const db = connect();
+    if (!db) {
+        memory.settings.set(key, value);
+        return;
+    }
+    db.prepare(
+        "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(key, JSON.stringify(value));
+}
+
+const readDefaults = () => ({ ...structuredClone(DEFAULTS), ...readSetting("defaults", {}) });
+
+// --- migration -------------------------------------------------------------
+
+/**
+ * Copies an existing `config.json` in, once.
+ *
+ * Guarded by a marker row rather than by the file's absence: the file stays on
+ * disk afterwards as a backup, so "does it exist" cannot tell a fresh install
+ * from one already imported, and re-running it would undo every change made
+ * since.
+ *
  * Version 1 kept a single guild's settings at the top level, from when the bot
  * served one channel out of the .env. Those become the defaults every guild
  * starts from, so an upgrade keeps the settings that were already in use.
  */
-function migrate(raw) {
-    if (raw?.version === 2) return raw;
+function importLegacy(db) {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'migrated'").get();
+    if (done || !existsSync(LEGACY_PATH)) return;
 
-    const { discovery, ...rest } = raw ?? {};
-    return {
-        version: 2,
-        discovery: { ...EMPTY.discovery, ...(discovery ?? {}) },
-        defaults: { ...structuredClone(DEFAULTS), ...rest },
-        guilds: {},
-    };
-}
-
-async function readStore() {
-    if (cache) return cache;
+    let raw;
     try {
-        cache = migrate(JSON.parse(await readFile(STORE_PATH, "utf8")));
-    } catch {
-        cache = structuredClone(EMPTY);
+        raw = JSON.parse(readFileSync(LEGACY_PATH, "utf8"));
+    } catch (e) {
+        console.error(`[STORE] ${LEGACY_PATH} unreadable, starting fresh: ${e.message}`);
+        return;
     }
-    await flush();
-    return cache;
+
+    const isV2 = raw?.version === 2;
+    const { discovery, ...rest } = raw ?? {};
+    const defaults = isV2 ? (raw.defaults ?? {}) : rest;
+    const guilds = isV2 ? (raw.guilds ?? {}) : {};
+
+    // One transaction: a crash halfway must not leave some guilds imported and
+    // the marker unwritten, which on the next boot would import them twice.
+    db.transaction(() => {
+        const put = db.prepare(
+            "INSERT INTO guilds(guild_id, record) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET record = excluded.record",
+        );
+        for (const [guildId, record] of Object.entries(guilds)) {
+            put.run(guildId, JSON.stringify(record));
+        }
+        const set = db.prepare(
+            "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        );
+        set.run("defaults", JSON.stringify(defaults));
+        set.run("discovery", JSON.stringify({ ...DISCOVERY, ...(discovery ?? {}) }));
+        set.run("migrated", JSON.stringify({ at: Date.now(), from: LEGACY_PATH }));
+    })();
+
+    const n = Object.keys(guilds).length;
+    console.log(`[STORE] imported ${n} guild(s) from ${LEGACY_PATH}; the file is kept as a backup`);
+
+    // Renamed so nobody edits it later expecting an effect. Best effort: a
+    // read-only directory is not a reason to fail the boot.
+    try {
+        renameSync(LEGACY_PATH, `${LEGACY_PATH}.migrated`);
+    } catch {
+        // Left in place; the marker row already prevents a second import.
+    }
 }
 
-/** Written through a temporary file: a crash mid-write must not truncate it. */
-async function flush() {
-    const tmp = `${STORE_PATH}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(cache, null, 2) + "\n");
-    await rename(tmp, STORE_PATH);
-}
+// --- guilds ----------------------------------------------------------------
 
 /** The guild's record, filled in from the defaults. Not persisted until saved. */
 export async function guildConfig(guildId) {
-    const store = await readStore();
-    const saved = store.guilds[guildId] ?? {};
+    const db = connect();
+    const defaults = readDefaults();
+
+    let saved = {};
+    if (!db) {
+        saved = memory.guilds.get(guildId) ?? {};
+    } else {
+        try {
+            const row = db.prepare("SELECT record FROM guilds WHERE guild_id = ?").get(guildId);
+            if (row) saved = JSON.parse(row.record);
+        } catch (e) {
+            console.error(`[STORE] read guild ${guildId} failed: ${e.message}`);
+        }
+    }
+
     return {
-        ...structuredClone(store.defaults),
+        ...defaults,
         ...saved,
         // Nested objects would otherwise be replaced wholesale by a partial one.
-        auto: { ...store.defaults.auto, ...(saved.auto ?? {}) },
-        roles: { ...store.defaults.roles, ...(saved.roles ?? {}) },
+        auto: { ...defaults.auto, ...(saved.auto ?? {}) },
+        roles: { ...defaults.roles, ...(saved.roles ?? {}) },
         guildId,
     };
 }
 
 export async function saveGuild(guildId, config) {
-    const store = await readStore();
+    const db = connect();
     const { guildId: _ignored, ...record } = config;
-    store.guilds[guildId] = record;
-    await flush();
+
+    if (!db) {
+        memory.guilds.set(guildId, record);
+        return config;
+    }
+    db.prepare(
+        "INSERT INTO guilds(guild_id, record) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET record = excluded.record",
+    ).run(guildId, JSON.stringify(record));
     return config;
 }
 
+// --- discovery -------------------------------------------------------------
 
 export async function readDiscovery() {
-    return (await readStore()).discovery;
+    return { ...DISCOVERY, ...readSetting("discovery", {}) };
 }
 
 export async function saveDiscovery(discovery) {
-    const store = await readStore();
-    store.discovery = { ...store.discovery, ...discovery };
-    await flush();
-    return store.discovery;
+    const merged = { ...(await readDiscovery()), ...discovery };
+    writeSetting("discovery", merged);
+    return merged;
+}
+
+/**
+ * Writes the current state back out as JSON, for a backup or to inspect it.
+ *
+ * The database is the record now; this is a convenience, and deliberately not
+ * the path the bot itself reads.
+ */
+export async function exportJson(path) {
+    const db = connect();
+    const guilds = {};
+    if (db) {
+        for (const row of db.prepare("SELECT guild_id, record FROM guilds").all()) {
+            guilds[row.guild_id] = JSON.parse(row.record);
+        }
+    } else {
+        for (const [id, record] of memory.guilds) guilds[id] = record;
+    }
+    const payload = {
+        version: 2,
+        discovery: await readDiscovery(),
+        defaults: readDefaults(),
+        guilds,
+    };
+    writeFileSync(path, JSON.stringify(payload, null, 2) + "\n");
+    return payload;
 }

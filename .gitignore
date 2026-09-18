@@ -5,6 +5,7 @@ node_modules/
 
 # Runtime state: guild ids, channel ids, pinned servers
 config.json
+config.json.migrated
 
 # Generated output
 preview-*.jpg

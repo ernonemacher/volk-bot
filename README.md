@@ -79,14 +79,18 @@ anyone in the channel. [Why](docs/USAGE.md#permissions).
 ## Configuration
 
 Environment (see `.env.example`): `DISCORD_TOKEN` is the only required value.
-`SQUADCALC_STORE` points persisted state somewhere other than `./config.json`,
-which matters on a host with an ephemeral disk. `SQUADCALC_API` picks the
-SquadCalc backend, defaulting to the beta build because it carries the modded
-layers.
+`VOLK_DB` points persisted state and usage events somewhere other than
+`./volk_db`, which matters on a host with an ephemeral disk. `SQUADCALC_API`
+picks the SquadCalc backend, defaulting to the beta build because it carries the
+modded layers.
 
 Everything else is per guild and lives in the store: panel channel, watched
 server, pinned servers, language, refresh interval and roles. Discovery settings
 are global, since "which servers are in a match right now" has one answer.
+
+State is a SQLite file. An existing `config.json` from an older build is
+imported on first boot and renamed to `.migrated`, kept as a backup;
+`SQUADCALC_STORE` still says where to look for it.
 
 ## What it records
 
