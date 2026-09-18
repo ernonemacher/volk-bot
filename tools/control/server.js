@@ -20,6 +20,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { inspect } from "./inspect.js";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 const PORT = Number(process.env.VOLK_PANEL_PORT ?? 7317);
@@ -207,6 +209,13 @@ const server = createServer(async (req, res) => {
         for (const entry of lines) send(res, "line", entry);
         req.on("close", () => clients.delete(res));
         return;
+    }
+
+    // What the bot recorded, as opposed to what it printed. Polled by the page
+    // rather than pushed on every line: these are aggregates over a day, and
+    // recomputing them per log line would be wasteful and no fresher.
+    if (url.pathname === "/inspect") {
+        return json(res, inspect());
     }
 
     if (req.method === "POST") {

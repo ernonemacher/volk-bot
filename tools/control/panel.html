@@ -67,6 +67,26 @@
   .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
   .tag.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 
+  .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 18px; }
+  .split section { min-width: 0; }
+  /* Capped and scrollable: the two lists fill at very different rates, and
+     letting the longer one set the page height pushed the log off-screen. */
+  .split .list { max-height: 210px; overflow-y: auto; }
+
+  .item { display: flex; align-items: baseline; gap: 8px; background: var(--panel);
+          border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+          font-size: 12.5px; margin-bottom: 5px; }
+  .item + .item { margin-top: 0; }
+  .item .scope { font-family: var(--mono); font-size: 11px; color: var(--warn); flex: none; }
+  .item .msg { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .when { margin-left: auto; color: var(--dim); font-size: 11px; flex: none;
+                font-variant-numeric: tabular-nums; }
+  .item .times { flex: none; font-size: 11px; color: var(--bad); font-weight: 650; }
+  .item.denied .scope { color: var(--bad); }
+  .item code { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+
+  .guild .meta { color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
   .loghead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
   .loghead h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .6px; color: var(--dim); }
   label.chk { margin-left: auto; color: var(--dim); font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -98,7 +118,17 @@
     <div class="card"><h2>No ar há</h2><div class="v" id="c-uptime">—</div></div>
     <div class="card"><h2>Conta Discord</h2><div class="v small" id="c-tag">—</div></div>
     <div class="card"><h2>PID</h2><div class="v" id="c-pid">—</div></div>
-    <div class="card"><h2>Erros</h2><div class="v" id="c-err">0</div></div>
+    <div class="card"><h2>Erros (sessão)</h2><div class="v" id="c-err">0</div></div>
+  </div>
+
+  <!-- Read from volk_db, so these survive a restart and cover the last 24h,
+       unlike the counters above which only know this session. -->
+  <div class="cards">
+    <div class="card"><h2>Erros 24h</h2><div class="v" id="d-err">—</div></div>
+    <div class="card"><h2>Cliques 24h</h2><div class="v" id="d-clicks">—</div></div>
+    <div class="card"><h2>Operadores 24h</h2><div class="v" id="d-ops">—</div></div>
+    <div class="card"><h2>Renders 24h</h2><div class="v" id="d-renders">—</div></div>
+    <div class="card"><h2>Render típico</h2><div class="v" id="d-p50">—</div></div>
   </div>
 
   <div class="bar">
@@ -110,8 +140,20 @@
 
   <div class="guilds" id="guilds"></div>
 
+  <div class="split">
+    <section>
+      <div class="loghead"><h2>Falhas recentes (7 dias)</h2></div>
+      <div class="list" id="errors"><div class="empty">nenhuma</div></div>
+    </section>
+    <section>
+      <div class="loghead"><h2>Últimos cliques</h2></div>
+      <div class="list" id="clicks"><div class="empty">nenhum ainda</div></div>
+    </section>
+  </div>
+
   <div class="loghead">
     <h2>Log ao vivo</h2>
+    <span class="sub" id="dbpath"></span>
     <label class="chk"><input type="checkbox" id="follow" checked> acompanhar</label>
   </div>
   <div id="log"><div class="empty">sem linhas ainda</div></div>
@@ -143,6 +185,7 @@
   };
 
   function paint(s) {
+    lastState = s;
     startedAt = s.startedAt;
     $("dot").className = "dot" + (s.running ? " on" : s.lastExit ? " bad" : "");
     $("c-state").textContent = s.running ? "no ar" : "parado";
@@ -160,15 +203,33 @@
     $("b-start").disabled = s.running;
     $("b-stop").disabled = !s.running;
 
+    // The log says whether the panel is publishing; the database says what it
+    // is publishing and whether anyone is using it. Union of both, keyed by id,
+    // so a guild the bot has not reached yet this session still shows up with
+    // its stored configuration.
     const box = $("guilds");
     box.innerHTML = "";
-    for (const g of s.guilds) {
-      const [cls, text] = GUILD_TAG[g.state] ?? ["", g.state];
+    const ids = new Set([...s.guilds.map((g) => g.id), ...dbGuilds.keys()]);
+
+    for (const id of ids) {
+      const live = s.guilds.find((g) => g.id === id);
+      const db = dbGuilds.get(id);
+      const [cls, text] = live ? (GUILD_TAG[live.state] ?? ["", live.state]) : ["", "sem contato"];
+
+      const bits = [];
+      if (db?.serverId) bits.push(`servidor <code>${escapeHtml(db.serverId)}</code>`);
+      if (db?.layer) bits.push(escapeHtml(db.layer));
+      if (db?.auto) bits.push(`auto ${db.auto}s`);
+      if (db?.language) bits.push(db.language);
+      if (db?.clicks24h) bits.push(`${db.clicks24h} cliques 24h`);
+      if (db?.logChannelId) bits.push("log on");
+
       const el = document.createElement("div");
       el.className = "guild";
       el.innerHTML =
-        `<span>${g.channel ? "#" + escapeHtml(g.channel) : "<span class=\"empty\">nenhum canal</span>"}</span>` +
-        `<code>${escapeHtml(g.id)}</code>` +
+        `<span>${live?.channel ? "#" + escapeHtml(live.channel) : "<span class=\"empty\">nenhum canal</span>"}</span>` +
+        `<code>${escapeHtml(id)}</code>` +
+        (bits.length ? `<span class="meta">${bits.join(" · ")}</span>` : "") +
         `<span class="tag ${cls}">${escapeHtml(text)}</span>`;
       box.appendChild(el);
     }
@@ -193,6 +254,75 @@
   $("b-stop").onclick = () => post("/stop");
   $("b-restart").onclick = () => post("/restart");
   $("b-clear").onclick = () => { log.innerHTML = '<div class="empty">sem linhas ainda</div>'; empty = true; };
+
+  // --- what the bot recorded, as opposed to what it printed -----------------
+
+  const ago = (ms) => {
+    const s = Math.round((Date.now() - ms) / 1000);
+    if (s < 60) return "agora";
+    if (s < 3600) return `${Math.floor(s / 60)}min`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h`;
+    return `${Math.floor(s / 86400)}d`;
+  };
+
+  const CLICK_LABEL = {
+    flag: "confirmou objetivo", undo: "desfez", reset: "limpou",
+    server: "trocou servidor", perspective: "trocou lado", refresh: "atualizou",
+  };
+
+  function fill(el, rows, render, empty) {
+    el.innerHTML = rows.length
+      ? rows.map(render).join("")
+      : `<div class="empty">${empty}</div>`;
+  }
+
+  async function poll() {
+    let d;
+    try {
+      d = await fetch("/inspect").then((r) => r.json());
+    } catch {
+      return; // supervisor down; the SSE handler already says so
+    }
+
+    const h = d.health;
+    // A missing database is the normal state of a fresh clone, so the cards say
+    // "—" rather than zero: no data and no activity are different things.
+    $("d-err").textContent = h ? h.errors24h : "—";
+    $("d-err").style.color = h?.errors24h ? "var(--bad)" : "";
+    $("d-clicks").textContent = h ? h.clicks24h : "—";
+    $("d-ops").textContent = h ? h.operators24h : "—";
+    $("d-renders").textContent = h ? h.renders24h : "—";
+    $("d-p50").textContent = h?.renderP50 != null ? `${(h.renderP50 / 1000).toFixed(1)}s` : "—";
+
+    $("dbpath").textContent = d.db.present
+      ? `${h?.events ?? 0} eventos registrados`
+      : "sem banco ainda";
+
+    fill($("errors"), d.errors, (e) =>
+      `<div class="item">` +
+        `<span class="scope">${escapeHtml(e.scope ?? "?")}</span>` +
+        `<span class="msg" title="${escapeHtml(e.detail ?? "")}">${escapeHtml(e.detail ?? "")}</span>` +
+        (e.n > 1 ? `<span class="times">${e.n}x</span>` : "") +
+        `<span class="when">${ago(e.last_at)}</span>` +
+      `</div>`, "nenhuma falha em 7 dias");
+
+    fill($("clicks"), d.clicks, (c) =>
+      `<div class="item${c.denied ? " denied" : ""}">` +
+        `<span class="scope">${c.denied ? "negado" : "ok"}</span>` +
+        `<span class="msg">${escapeHtml(CLICK_LABEL[c.action] ?? c.action)}` +
+          (c.user_id ? ` <code>${escapeHtml(c.user_id)}</code>` : "") +
+        `</span>` +
+        `<span class="when">${ago(c.at)}</span>` +
+      `</div>`, "ninguém usou o painel ainda");
+
+    dbGuilds = new Map(d.guilds.map((g) => [g.id, g]));
+    if (lastState) paint(lastState);
+  }
+
+  let dbGuilds = new Map();
+  let lastState = null;
+  poll();
+  setInterval(poll, 5000);
 
   function connect() {
     const es = new EventSource("/events");

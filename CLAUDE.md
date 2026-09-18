@@ -35,7 +35,7 @@ node experiments/ws-test.mjs <sessionId>          # probe a SquadCalc websocket 
 
 `src/render-map.js` is the main development loop: it prints gamemode, live flag count, next step and timing, and needs no Discord token. Flags can be named by display name or by short key (`B1`).
 
-On a Mac, `Volk.command` starts the bot under a supervisor with a local page (`tools/control/`) to watch the log and stop or restart it; closing the window stops the bot, which `npm start` in a terminal does not.
+On a Mac, `Volk.command` starts the bot under a supervisor with a local page (`tools/control/`) to watch the log and stop or restart it; closing the window stops the bot, which `npm start` in a terminal does not. That page reads two sources: the log it is already capturing, and `volk_db` through `tools/control/inspect.js`, which opens the database **read-only and per request** so it never contends with the bot writing. What the database adds is everything that outlives the process, since the log buffer holds 500 lines and dies with it: errors in the last 7 days folded by shape, the last clicks with the member behind each one, render p50, and per guild the watched server and the layer it last drew. `inspect.js` reads `VOLK_DB` out of `.env` itself, because the supervisor never loads dotenv — it only passes its environment to the child.
 
 **There is no test suite and no linter.** Verification is running `render-map.js` against a real layer, or the bot against a real server.
 

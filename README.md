@@ -46,8 +46,11 @@ npm start
 
 On a Mac, double-click **`Volk.command`** instead: it starts the bot under a
 supervisor and opens a local page to watch the log, see which channel each guild
-publishes to, and stop or restart it. Closing its window stops the bot, which is
-the difference between it and `npm start` in a terminal that later gets closed:
+publishes to, and stop or restart it. The same page reads the usage database, so
+it also shows the failures of the last week, who has been clicking, how long a
+render takes and which layer each guild is looking at — all of which survive a
+restart, unlike the log. Closing its window stops the bot, which is the
+difference between it and `npm start` in a terminal that later gets closed:
 that leaves an orphan holding the gateway with its logs going nowhere.
 
 Invite the bot with **both** the `bot` and `applications.commands` scopes
