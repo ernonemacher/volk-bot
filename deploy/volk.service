@@ -25,6 +25,11 @@ Environment=MALLOC_ARENA_MAX=2
 StateDirectory=volk
 Environment=SQUADCALC_STORE=/var/lib/volk/config.json
 
+# Usage and error events. Beside the config on the same writable directory, so
+# a backup of /var/lib/volk carries both. Holds Discord user ids, pruned after
+# TELEMETRY_RETENTION_DAYS (default 90).
+Environment=VOLK_DB=/var/lib/volk/volk_db
+
 # The bot listens on nothing and writes one file, so it can afford to be
 # locked down.
 ProtectSystem=strict

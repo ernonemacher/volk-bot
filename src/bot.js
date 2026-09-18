@@ -24,6 +24,8 @@ import { renderLayer } from "./render-map.js";
 import { translator } from "./i18n.js";
 import { canOperate } from "./permissions.js";
 import { registerCommands, handleCommand } from "./commands.js";
+import { closeTelemetry, purge, timed, track, trackError } from "./telemetry.js";
+import { reportError, startErrorReporter } from "./reporter.js";
 import {
     buildComponents,
     buildEmbed,
@@ -99,20 +101,62 @@ async function refresh(panel) {
                 await buildComponents(panel, null, t, status, config),
             );
             await publishMap(panel, channel, null, `_${t(reasonKey)}_`);
+            // Recorded, because a panel that is up but unplayable looks
+            // identical to a healthy one in every other count: without this a
+            // server offline for days leaves no trace at all.
+            track("unplayable", {
+                guildId: panel.guildId,
+                serverId: panel.serverId,
+                action: status.found ? "seeding" : "offline",
+                players: status.players ?? null,
+                ok: false,
+            });
             return;
         }
 
         const layerChanged = syncLayer(panel, status.layer);
         const state = await currentState(panel);
 
+        // The richest server-side datum there is: it says how long a match ran
+        // and which layers a server actually rotates through.
+        if (layerChanged) {
+            track("layer_change", {
+                guildId: panel.guildId,
+                serverId: panel.serverId,
+                layer: status.layer,
+                gamemode: state?.gamemode,
+                players: status.players,
+                playTimeMin: status.playTimeMin,
+            });
+        }
+
         const key = renderKey(panel, status);
         const needsImage = key !== panel.lastRenderKey;
         const image = needsImage
             ? (
-                  await renderLayer(panel.layerName, panel.picked, {
-                      perspective: panel.perspective,
-                      factions: { team1: status.team1, team2: status.team2 },
-                  })
+                  await timed(
+                      "render",
+                      {
+                          guildId: panel.guildId,
+                          serverId: panel.serverId,
+                          layer: panel.layerName,
+                          gamemode: state?.gamemode,
+                          // laneState zeroes stepCount and lanes on its
+                          // degenerate branch (linear modes, or an unsolved
+                          // board). Without these two flags those zeros read as
+                          // real measurements in any later query.
+                          linear: state?.linear ?? null,
+                          solver_ok: state ? state.stepCount > 0 : null,
+                          picked: panel.picked.length,
+                          lanes_alive: state?.lanes?.alive ?? null,
+                          lanes_total: state?.lanes?.total ?? null,
+                      },
+                      () =>
+                          renderLayer(panel.layerName, panel.picked, {
+                              perspective: panel.perspective,
+                              factions: { team1: status.team1, team2: status.team2 },
+                          }),
+                  )
               ).image
             : null;
 
@@ -128,7 +172,15 @@ async function refresh(panel) {
         }
         commitLayer(panel);
     } catch (e) {
+        // This exact wording is parsed by tools/control/server.js to mark the
+        // guild as failing. Telemetry goes beside it, never in place of it.
         console.error(`[BOT] refresh failed for guild ${panel.guildId}:`, e.message);
+        trackError("refresh", e, {
+            guildId: panel.guildId,
+            serverId: panel.serverId,
+            layer: panel.layerName,
+        });
+        reportError(client, panel.guildId, "refresh", e);
         // Same reason as the offline branch: an error panel with no controls
         // can only be recovered by restarting the process.
         try {
@@ -280,7 +332,9 @@ async function mount(guildId) {
     try {
         channel = await client.channels.fetch(config.channelId);
     } catch (e) {
+        // Parsed by tools/control/server.js as the guild's "unreachable" state.
         console.error(`[BOT] guild ${guildId}: channel unreachable (${e.message})`);
+        trackError("mount", e, { guildId });
         return null;
     }
 
@@ -349,9 +403,10 @@ function rearmAuto(panel, config) {
 
     const seconds = Math.min(Math.max(config.auto.intervalSeconds ?? 60, AUTO_MIN), AUTO_MAX);
     panel.autoTimer = setInterval(() => {
-        enqueue(panel, () => refresh(panel)).catch((e) =>
-            console.error(`[BOT] auto refresh failed for guild ${panel.guildId}:`, e.message),
-        );
+        enqueue(panel, () => refresh(panel)).catch((e) => {
+            console.error(`[BOT] auto refresh failed for guild ${panel.guildId}:`, e.message);
+            trackError("auto", e, { guildId: panel.guildId, serverId: panel.serverId });
+        });
     }, seconds * 1000);
 }
 
@@ -360,7 +415,11 @@ function rearmAuto(panel, config) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("clientReady", async () => {
+    // tools/control/server.js reads this exact line to recover the bot's tag.
     console.log(`[BOT] connected as ${client.user.tag}`);
+    track("lifecycle", { action: "boot", tag: client.user.tag });
+    startErrorReporter(client);
+    startRetention();
 
     const guilds = await client.guilds.fetch();
     if (!guilds.size) {
@@ -399,9 +458,14 @@ client.once("clientReady", async () => {
 
 client.on("guildCreate", async (guild) => {
     console.log(`[BOT] added to ${guild.name}`);
-    await registerCommands(client, guild.id).catch((e) =>
-        console.error(`[BOT] command registration failed for ${guild.id}: ${e.message}`),
-    );
+    // install/uninstall pairs are what tell growth from churn: a guild that
+    // adds the bot and never clicks anything looks identical to a healthy one
+    // in the guild count alone.
+    track("lifecycle", { action: "install", guildId: guild.id, name: guild.name });
+    await registerCommands(client, guild.id).catch((e) => {
+        console.error(`[BOT] command registration failed for ${guild.id}: ${e.message}`);
+        trackError("register", e, { guildId: guild.id });
+    });
 });
 
 client.on("guildDelete", (guild) => {
@@ -409,6 +473,7 @@ client.on("guildDelete", (guild) => {
     if (panel) stopAuto(panel);
     panels.delete(guild.id);
     console.log(`[BOT] removed from ${guild.name}`);
+    track("lifecycle", { action: "uninstall", guildId: guild.id, name: guild.name });
 });
 
 client.on("interactionCreate", async (i) => {
@@ -418,6 +483,12 @@ client.on("interactionCreate", async (i) => {
         try {
             return await handleCommand(i, repaint);
         } catch (e) {
+            trackError("command", e, {
+                guildId: i.guildId,
+                userId: i.user.id,
+                sub: i.options?.getSubcommand?.(false) ?? null,
+            });
+            reportError(client, i.guildId, "command", e);
             const payload = {
                 content: `Failed: ${e.message}`.slice(0, 300),
                 flags: MessageFlags.Ephemeral,
@@ -437,6 +508,18 @@ client.on("interactionCreate", async (i) => {
     // The slash command is gated by Discord; the panel's controls are not, so
     // this is the only place operating can be restricted to a role.
     if (!canOperate(i, config)) {
+        // Recorded with the member's id: a guild where the same people keep
+        // bouncing off the panel has its operator roles set too tight, and
+        // without the id there is nobody to go and ask.
+        track("click", {
+            action: i.customId,
+            guildId: i.guildId,
+            userId: i.user.id,
+            serverId: panel.serverId,
+            layer: panel.layerName,
+            denied: "permission",
+            ok: false,
+        });
         return i.reply({ content: t("warn.notAllowed"), flags: MessageFlags.Ephemeral });
     }
 
@@ -458,6 +541,20 @@ client.on("interactionCreate", async (i) => {
     }
 
     await i.deferUpdate();
+
+    // One point for every control, before the branches act: what the click was
+    // and who made it is the same shape whichever button it was, and the
+    // per-control detail rides along in `value`.
+    track("click", {
+        action: i.customId,
+        guildId: i.guildId,
+        userId: i.user.id,
+        serverId: panel.serverId,
+        layer: panel.layerName,
+        value: i.values?.[0] ?? null,
+        picked: panel.picked.length,
+        ok: true,
+    });
 
     if (i.customId === "perspective") {
         panel.perspective = i.values[0];
@@ -484,14 +581,33 @@ client.on("interactionCreate", async (i) => {
     await enqueue(panel, () => refresh(panel));
 });
 
-client.on("error", (e) => console.error("[BOT] client error:", e.message));
-process.on("unhandledRejection", (e) =>
-    console.error("[BOT] unhandled rejection:", e?.message ?? e),
-);
+client.on("error", (e) => {
+    console.error("[BOT] client error:", e.message);
+    trackError("client", e);
+});
+process.on("unhandledRejection", (e) => {
+    console.error("[BOT] unhandled rejection:", e?.message ?? e);
+    trackError("unhandled", e);
+});
+
+/**
+ * Drops events past the retention window, on boot and daily after that.
+ *
+ * Unref'd: a purge waiting to fire must not be the reason the process refuses
+ * to exit on shutdown.
+ */
+function startRetention() {
+    purge();
+    setInterval(purge, 86400000).unref();
+}
 
 async function shutdown() {
     console.log("\n[BOT] shutting down");
     for (const panel of panels.values()) stopAuto(panel);
+    track("lifecycle", { action: "shutdown" });
+    // Closed before exit so WAL is checkpointed into the database file rather
+    // than left for the next boot to recover.
+    closeTelemetry();
     await client.destroy();
     process.exit(0);
 }

@@ -42,8 +42,13 @@ Pick a shape:
 - `VM.Standard.E2.1.Micro` (AMD), up to two: 1 GB each. Tight against the 460 MB
   peak but workable, and `MALLOC_ARENA_MAX=2` below is what makes it so.
 
-Use Ubuntu 24.04. `sharp` ships prebuilt binaries for `linux-arm64` and
-`linux-x64`, so nothing is compiled on the machine.
+Use Ubuntu 24.04. `sharp` and `better-sqlite3` both ship prebuilt binaries for
+`linux-arm64` and `linux-x64`, so nothing is compiled on the machine.
+
+`better-sqlite3` is pinned to the `12.x` line on purpose: `13.x` requires Node
+22, and this project supports Node 20. If `npm ci` starts compiling instead of
+downloading, the prebuilt for your Node ABI is missing and a newer Node is the
+fix, not `build-essential`.
 
 **Do not open any inbound ports.** The bot connects out and listens on nothing.
 
@@ -128,11 +133,20 @@ server, pinned servers, language, refresh interval and roles. systemd creates
 that directory and keeps it writable while the rest of the filesystem is read
 only to the service.
 
-It is the only thing worth backing up, and it is small:
+Beside it sits `volk_db`, the SQLite file holding usage and error events, which
+is what `/volk stats` reads. It grows with activity rather than with time: a
+busy guild writes on the order of a few thousand rows a day, a few megabytes a
+year, and a daily sweep drops anything past `TELEMETRY_RETENTION_DAYS`
+(default 90).
+
+Both live in the same directory, so one copy takes both:
 
 ```bash
-sudo cp /var/lib/volk/config.json ~/volk-backup.json
+sudo cp -a /var/lib/volk ~/volk-backup
 ```
 
-On a host with an ephemeral disk, point `SQUADCALC_STORE` at a mounted volume
-instead, or the bot forgets every guild on each deploy.
+The database holds Discord user ids, so treat that backup as personal data:
+keep it off shared storage, and see [What it records](../README.md#what-it-records).
+
+On a host with an ephemeral disk, point `SQUADCALC_STORE` **and** `VOLK_DB` at a
+mounted volume instead, or the bot forgets every guild on each deploy.

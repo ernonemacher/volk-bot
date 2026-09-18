@@ -14,6 +14,8 @@ import { isValidLanguage, availableLanguages } from "./i18n.js";
 import { LEVELS, grantRole, isAdmin, revokeRole, rolesFor } from "./permissions.js";
 import { AUTO_MAX, AUTO_MIN, fetchServerState, listServers } from "./servers.js";
 import { guildConfig, readDiscovery, saveDiscovery, saveGuild } from "./store.js";
+import { RETENTION_DAYS, forget, track } from "./telemetry.js";
+import { footprint, summary } from "./stats.js";
 
 const COMMAND = new SlashCommandBuilder()
     .setName("volk")
@@ -138,6 +140,42 @@ const COMMAND = new SlashCommandBuilder()
         s
             .setName("republish")
             .setDescription("Delete and post the panel again, for when it is wedged or deleted"),
+    )
+    .addSubcommand((s) =>
+        s
+            .setName("stats")
+            .setDescription("Usage and errors recorded by the bot")
+            .addStringOption((o) =>
+                o
+                    .setName("period")
+                    .setDescription("Window to report on (default 7d)")
+                    .addChoices(
+                        { name: "24h", value: "24h" },
+                        { name: "7d", value: "7d" },
+                        { name: "30d", value: "30d" },
+                    ),
+            )
+            .addBooleanOption((o) =>
+                o
+                    .setName("global")
+                    .setDescription("Every guild instead of only this one (default false)"),
+            ),
+    )
+    .addSubcommand((s) =>
+        s
+            .setName("logchannel")
+            .setDescription("Where failures are reported; leave empty to turn it off")
+            .addChannelOption((o) =>
+                o.setName("channel").setDescription("A private channel, not the panel one"),
+            ),
+    )
+    .addSubcommand((s) =>
+        s
+            .setName("forget")
+            .setDescription("Erase everything recorded about one member")
+            .addUserOption((o) =>
+                o.setName("user").setDescription("Member to erase").setRequired(true),
+            ),
     );
 
 /** Guild-scoped so it shows up immediately, instead of the global hour of lag. */
@@ -193,6 +231,10 @@ export async function handleCommand(i, repaint) {
     }
 
     const sub = i.options.getSubcommand();
+
+    // Which settings are actually used, and by whom. Recorded after the admin
+    // check so a refused attempt does not read as configuration activity.
+    track("command", { action: sub, guildId: i.guildId, userId: i.user.id });
 
     if (sub === "setup") {
         const channel = i.options.getChannel("channel") ?? i.channel;
@@ -383,6 +425,113 @@ export async function handleCommand(i, repaint) {
         await save();
         await i.reply(ephemeral(`Removed \`${id}\`. Refreshing the panel...`));
         return redraw();
+    }
+
+    if (sub === "stats") {
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const period = i.options.getString("period") ?? "7d";
+        // Scoped to this guild unless asked otherwise: an admin of one guild
+        // has no business reading another's activity by default.
+        const guildId = i.options.getBoolean("global") ? null : i.guildId;
+        const s = summary(period, guildId);
+        const disk = footprint();
+
+        if (!disk.events) {
+            return i.editReply(
+                "Nenhum evento registrado ainda. A telemetria grava a partir do próximo clique.",
+            );
+        }
+
+        const list = (rows, format, empty = "_nada_") =>
+            rows.length ? rows.map(format).join("\n") : empty;
+
+        const lines = [
+            `**Uso — ${period}${guildId ? "" : " · todas as guilds"}**`,
+            "",
+            `**Cliques:** ${s.clicks.reduce((sum, r) => sum + r.n, 0)}` +
+                (s.denied ? `  ·  ${s.denied} recusado(s) por permissão` : ""),
+            list(s.clicks, (r) => `  \`${r.action}\` ${r.n}`),
+            "",
+            `**Operadores distintos:** ${s.operators}`,
+            list(s.topOperators, (r) => `  <@${r.user_id}> — ${r.n}`),
+            "",
+            "**Servidores mais usados:**",
+            list(s.topServers, (r) => `  \`${r.server_id}\` — ${r.n}`),
+            "",
+            "**Layers mais vistos:**",
+            list(s.topLayers, (r) => `  ${r.layer} — ${r.n}x`),
+            "",
+            `**Renders:** ${s.renders}` +
+                (s.renderFailures ? `  ·  ${s.renderFailures} falharam` : "") +
+                (s.latency
+                    ? `\n  p50 ${s.latency.p50}ms  ·  p95 ${s.latency.p95}ms  ·  max ${s.latency.max}ms`
+                    : ""),
+            "",
+            ...(s.unplayable.length
+                ? [
+                      "**Sem partida (offline/seeding):**",
+                      list(s.unplayable, (r) => `  \`${r.server_id}\` ${r.state} — ${r.n}x`),
+                      "",
+                  ]
+                : []),
+            `**Erros:** ${s.errorTotal}`,
+            list(s.errors, (r) => `  \`${r.scope}\` ${r.n}`, "  _nenhum_"),
+            "",
+            ...(guildId ? [] : [`**Guilds ativas:** ${s.activeGuildsGlobal}`, ""]),
+            `_${disk.events} eventos armazenados · retenção de ${RETENTION_DAYS} dias_`,
+        ];
+
+        return i.editReply(lines.join("\n").slice(0, 1900));
+    }
+
+    if (sub === "logchannel") {
+        const channel = i.options.getChannel("channel");
+
+        if (!channel) {
+            cfg.logChannelId = null;
+            await save();
+            return i.reply(ephemeral("Relato de falhas **desligado**."));
+        }
+        if (!channel.isTextBased?.()) {
+            return i.reply(ephemeral("Escolha um canal de texto."));
+        }
+
+        // Same check as setup: a channel the bot cannot write to would swallow
+        // every error report and still look configured.
+        const missing = missingPermissions(i, channel);
+        if (missing.length) {
+            return i.reply(
+                ephemeral(
+                    `Faltam **${missing.join("**, **")}** em <#${channel.id}>. ` +
+                        "Conceda e rode o comando de novo.",
+                ),
+            );
+        }
+
+        cfg.logChannelId = channel.id;
+        await save();
+        return i.reply(
+            ephemeral(
+                `Falhas vão para <#${channel.id}>. ` +
+                    "Repetições da mesma falha são agrupadas numa janela de 10 minutos.",
+            ),
+        );
+    }
+
+    if (sub === "forget") {
+        const user = i.options.getUser("user");
+        const removed = forget(user.id);
+        // Recorded without the erased id: the audit trail must not reintroduce
+        // what the request was about removing.
+        track("command", { action: "forget", guildId: i.guildId, userId: i.user.id, removed });
+        return i.reply(
+            ephemeral(
+                removed
+                    ? `Apagados ${removed} evento(s) de <@${user.id}>.`
+                    : `Nada registrado sobre <@${user.id}>.`,
+            ),
+        );
     }
 
     if (sub === "search") {

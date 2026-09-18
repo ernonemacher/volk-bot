@@ -68,8 +68,9 @@ the controls, and the map image on its own below.
 ## Commands
 
 `/volk setup`, `config`, `roles`, `auto`, `language`, `pin`, `unpin`,
-`discovery`, `search`, `republish`. All usable from any channel, so configuring
-does not clutter the panel. [What each one does](docs/USAGE.md#setting-it-up).
+`discovery`, `search`, `republish`, `stats`, `logchannel`, `forget`. All usable
+from any channel, so configuring does not clutter the panel.
+[What each one does](docs/USAGE.md#setting-it-up).
 
 Access has two levels: `admin` covers settings that outlive the match and
 defaults to Manage Server, `operator` covers driving the panel and defaults to
@@ -86,6 +87,20 @@ layers.
 Everything else is per guild and lives in the store: panel channel, watched
 server, pinned servers, language, refresh interval and roles. Discovery settings
 are global, since "which servers are in a match right now" has one answer.
+
+## What it records
+
+The bot keeps a local usage log in `volk_db` (SQLite, moved with `VOLK_DB`): one
+row per panel click, render, slash command and failure, carrying the **Discord
+user id** of whoever acted, the guild, the watched server and the layer. It is
+what `/volk stats` reads, and it never leaves the machine.
+
+Rows are deleted after 90 days (`TELEMETRY_RETENTION_DAYS`), and
+`/volk forget @member` erases one member's rows on request. Nothing is recorded
+about members who never touch the panel, and no message content is ever stored.
+
+`/volk logchannel` additionally forwards failures to a channel of your choosing.
+It is off until you set it.
 
 ## Layout
 

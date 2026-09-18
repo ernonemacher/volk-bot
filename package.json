@@ -5,12 +5,15 @@
   "type": "module",
   "description": "Live Squad objective intel in Discord",
   "license": "SEE LICENSE IN LICENSE",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/bot.js",
     "render": "node src/render-map.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "discord.js": "^14.27.0",
     "dotenv": "^17.4.2",
     "sharp": "^0.35.4"

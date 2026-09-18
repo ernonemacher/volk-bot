@@ -17,3 +17,8 @@ preview-*.png
 docs/PRODUCT.md
 docs/BACKLOG.md
 docs/COMPANION.md
+
+# Telemetry: usage events and Discord user ids
+volk_db
+volk_db-wal
+volk_db-shm

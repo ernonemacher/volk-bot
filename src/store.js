@@ -41,6 +41,9 @@ const DEFAULTS = {
     },
     // Empty means "anyone may operate the panel"; see permissions.js.
     roles: { admin: [], operator: [] },
+    // Where failures are reported. Null means nothing is sent: the events are
+    // still recorded, so this is a notification channel, not the record.
+    logChannelId: null,
 };
 
 const EMPTY = {
