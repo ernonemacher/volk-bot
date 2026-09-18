@@ -44,6 +44,7 @@ export function newPanel(serverId, { guildId, channelId } = {}) {
         channelId,
         serverId,
         layerName: null, // layer the confirmations belong to
+        pendingLayer: null, // adopted but not yet published; see syncLayer
         picked: [], // flag keys, in the order confirmed
         perspective: "team1", // which main the depths count from
         textMessageId: null,
@@ -59,14 +60,28 @@ export function newPanel(serverId, { guildId, channelId } = {}) {
 
 /**
  * Drops the picks when the server moved on to another layer.
+ *
+ * The move is only *staged* here. A refresh that adopts a new layer and then
+ * fails before publishing would otherwise leave the panel believing it already
+ * drew the new layer: the next tick sees `panel.layerName` matching the server,
+ * returns early, and the render key still matches the last upload, so the old
+ * map stays on screen until the server rotates again. `commitLayer` closes the
+ * transition once the publish that used it actually landed.
+ *
  * @returns {boolean} whether a reset happened
  */
 export function syncLayer(panel, layerName) {
-    if (panel.layerName === layerName) return false;
+    if (panel.layerName === layerName && !panel.pendingLayer) return false;
     panel.layerName = layerName;
+    panel.pendingLayer = layerName;
     panel.picked = [];
     panel.perspective = "team1";
     return true;
+}
+
+/** Marks the staged layer as successfully published. */
+export function commitLayer(panel) {
+    panel.pendingLayer = null;
 }
 
 export async function buildComponents(panel, state, t, status = {}, config = {}) {

@@ -28,6 +28,7 @@ import {
     buildComponents,
     buildEmbed,
     canPick,
+    commitLayer,
     currentState,
     newPanel,
     syncLayer,
@@ -125,6 +126,7 @@ async function refresh(panel) {
             await publishMap(panel, channel, image);
             panel.lastRenderKey = key;
         }
+        commitLayer(panel);
     } catch (e) {
         console.error(`[BOT] refresh failed for guild ${panel.guildId}:`, e.message);
         // Same reason as the offline branch: an error panel with no controls
@@ -465,6 +467,7 @@ client.on("interactionCreate", async (i) => {
     if (i.customId === "server") {
         panel.serverId = i.values[0];
         panel.layerName = null; // different server, different match
+        panel.pendingLayer = null; // nothing staged worth retrying either
         panel.picked = [];
         panel.lastRenderKey = null;
         // Survives a restart: which server to watch is a choice, not state.
