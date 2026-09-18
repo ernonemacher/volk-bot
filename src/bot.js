@@ -19,7 +19,7 @@ import "dotenv/config";
 import { AttachmentBuilder, Client, GatewayIntentBits, MessageFlags } from "discord.js";
 
 import { AUTO_MAX, AUTO_MIN, fetchServerState, labelFor } from "./servers.js";
-import { guildConfig, saveGuild } from "./store.js";
+import { guildConfig, saveGuild, saveGuildIdentity } from "./store.js";
 import { renderLayer } from "./render-map.js";
 import { translator } from "./i18n.js";
 import { canOperate } from "./permissions.js";
@@ -338,6 +338,20 @@ async function mount(guildId) {
         return null;
     }
 
+    // The control panel has the guild's id and nothing else to call it by, so
+    // record what Discord calls it while we have the object in hand. Observed,
+    // not configured: a rename or a new icon lands here on the next mount.
+    // Awaited but harmless: the store swallows its own failures.
+    const guild = channel.guild;
+    if (guild) {
+        await saveGuildIdentity(guildId, {
+            name: guild.name,
+            // A guild with no icon returns null, which the panel renders as
+            // initials. Size-capped because this is decoration on a local page.
+            icon: guild.iconURL?.({ extension: "png", size: 64 }) ?? null,
+        });
+    }
+
     const panel = newPanel(config.serverId, { guildId, channelId: config.channelId });
     panels.set(guildId, panel);
     await adoptMessages(panel, channel);
@@ -613,5 +627,35 @@ async function shutdown() {
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+/**
+ * Exits if the supervisor that started us is gone.
+ *
+ * SIGKILL on the control panel leaves this process orphaned but perfectly
+ * healthy: it keeps the gateway, keeps refreshing, and writes its log into a
+ * pipe nobody reads. The next launch then starts a *second* bot on the same
+ * token, and two clients edit the same two messages per guild: the
+ * interleaving `enqueue` prevents within one process and cannot prevent across
+ * two.
+ *
+ * Only when we were actually spawned by a supervisor: run straight from
+ * `npm start` the parent is a shell whose exit is none of our business, and
+ * `VOLK_SUPERVISOR_PID` is what tells the two apart.
+ */
+function watchSupervisor() {
+    const parent = Number(process.env.VOLK_SUPERVISOR_PID);
+    if (!parent) return;
+
+    setInterval(() => {
+        try {
+            // Signal 0 tests for the process without touching it.
+            process.kill(parent, 0);
+        } catch {
+            console.log(`[BOT] supervisor ${parent} is gone, exiting`);
+            shutdown();
+        }
+    }, 5000).unref();
+}
+watchSupervisor();
 
 client.login(TOKEN);

@@ -9,6 +9,18 @@
  * the bot running and reopening the page shows the same state, while quitting
  * the supervisor takes the bot down with it.
  *
+ * `Volk.command` now starts this **detached** and closes its terminal window,
+ * so there is no window to read and no window to close: the page is the only
+ * way in, and `/quit` the only way out. Three things follow, and each exists
+ * because the terminal used to provide it for free:
+ *
+ *  - the log goes to `logs/panel.log` as well as to stdout, because stdout now
+ *    has nobody watching it;
+ *  - a pidfile says which supervisor is the live one, so a second launch can
+ *    tell "already running" from "stale port";
+ *  - `/health` answers in one cheap request, for the menu bar helper and for a
+ *    curl when the page itself is what looks broken.
+ *
  * Loopback only, and no dependency beyond what the bot already installs: this
  * listens on a port with the Discord token in the child's environment, so it
  * must not be reachable from the network.
@@ -16,6 +28,14 @@
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import {
+    createWriteStream,
+    mkdirSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +45,87 @@ import { inspect } from "./inspect.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 const PORT = Number(process.env.VOLK_PANEL_PORT ?? 7317);
+
+const LOG_DIR = join(ROOT, "logs");
+const LOG_FILE = join(LOG_DIR, "panel.log");
+const PID_FILE = join(LOG_DIR, "panel.pid");
+const BOOTED_AT = Date.now();
+
+/**
+ * The log on disk.
+ *
+ * Detached, this process has no terminal, so `console.log` goes to whatever
+ * `Volk.command` redirected it to and nothing else. Everything the page shows
+ * is also appended here, which is the only record that survives both the
+ * browser being closed and this process dying.
+ *
+ * Append mode, and truncated at boot only past a size cap: a supervisor left up
+ * for weeks should not fill the disk, but the tail of the previous run is
+ * usually the thing you came looking for.
+ */
+const LOG_CAP = 4 * 1024 * 1024;
+let logStream = null;
+
+function openLog() {
+    try {
+        mkdirSync(LOG_DIR, { recursive: true });
+        let flags = "a";
+        try {
+            if (statSync(LOG_FILE).size > LOG_CAP) flags = "w";
+        } catch {
+            // No previous log; append to a new one.
+        }
+        logStream = createWriteStream(LOG_FILE, { flags });
+        logStream.on("error", () => {
+            // A full or read-only disk must not take the supervisor down: the
+            // page and stdout still work without the file.
+            logStream = null;
+        });
+    } catch {
+        logStream = null;
+    }
+}
+
+const stamp = (at) => new Date(at).toISOString().slice(11, 23);
+
+function toLog(entry) {
+    if (!logStream) return;
+    try {
+        logStream.write(`${stamp(entry.at)} ${entry.stream} ${entry.line}\n`);
+    } catch {
+        logStream = null;
+    }
+}
+
+/**
+ * Who the live supervisor is.
+ *
+ * With no terminal window to look at, "is it already running?" has to be
+ * answerable from outside. `Volk.command` reads this before launching, so a
+ * second double-click reopens the page instead of racing for the port, and a
+ * pidfile left by a process that died is recognised as stale rather than
+ * believed.
+ */
+function claimPidFile() {
+    try {
+        mkdirSync(LOG_DIR, { recursive: true });
+        writeFileSync(PID_FILE, `${process.pid}\n`);
+    } catch {
+        // Not fatal: the port check in Volk.command still catches a duplicate.
+    }
+}
+
+function releasePidFile() {
+    try {
+        // Only if it is still ours. A newer supervisor may have claimed it,
+        // and removing its file would make a live panel look absent.
+        if (Number(readFileSync(PID_FILE, "utf8").trim()) === process.pid) {
+            rmSync(PID_FILE, { force: true });
+        }
+    } catch {
+        // Nothing to release.
+    }
+}
 
 /** Ring buffer of log lines. Enough to explain a crash, bounded so a bot left
  *  running for days cannot grow it without limit. */
@@ -59,6 +160,7 @@ function push(stream, text) {
         const entry = { seq: seq++, at: now(), stream, line };
         lines.push(entry);
         while (lines.length > MAX_LINES) lines.shift();
+        toLog(entry);
 
         interpret(line, stream);
         for (const res of clients) send(res, "line", entry);
@@ -129,7 +231,15 @@ function start() {
 
     child = spawn(process.execPath, ["src/bot.js"], {
         cwd: ROOT,
-        env: { ...process.env, NODE_ENV: process.env.NODE_ENV ?? "development" },
+        env: {
+            ...process.env,
+            NODE_ENV: process.env.NODE_ENV ?? "development",
+            // So the bot can notice if this supervisor is killed outright.
+            // SIGKILL here runs none of the cleanup below, and an orphaned bot
+            // keeps the gateway while the next launch starts a second one on
+            // the same token. The bot watches this pid and exits with it.
+            VOLK_SUPERVISOR_PID: String(process.pid),
+        },
         stdio: ["ignore", "pipe", "pipe"],
     });
     startedAt = now();
@@ -295,6 +405,33 @@ async function handle(req, res) {
         return;
     }
 
+    /**
+     * One cheap request that answers "is it up?" without opening the page.
+     *
+     * The menu bar helper polls this every few seconds, so it touches nothing
+     * expensive: no database, no filesystem, just what is already in memory.
+     * It is also what to curl when the page is the thing that looks broken:
+     * a reply here with `listening: true` means the socket is fine and the
+     * problem is in the browser.
+     */
+    if (url.pathname === "/health") {
+        const snap = snapshot();
+        return json(res, {
+            ok: true,
+            panel: { pid: process.pid, bootedAt: BOOTED_AT, listening: server.listening },
+            bot: {
+                running: snap.running,
+                pid: snap.pid,
+                startedAt: snap.startedAt,
+                tag: snap.tag,
+                errors: snap.errors,
+                guilds: snap.guilds.length,
+                failing: snap.guilds.filter((g) => g.state !== "ok").length,
+                lastExit: snap.lastExit,
+            },
+        });
+    }
+
     // What the bot recorded, as opposed to what it printed. Polled by the page
     // rather than pushed on every line: these are aggregates over a day, and
     // recomputing them per log line would be wasteful and no fresher.
@@ -306,10 +443,41 @@ async function handle(req, res) {
         if (url.pathname === "/start") return json(res, start());
         if (url.pathname === "/stop") return json(res, await stop());
         if (url.pathname === "/restart") return json(res, await restart());
+        // The only way out now that there is no terminal window to close.
         if (url.pathname === "/quit") {
             json(res, { ok: true });
+            push("sys", "[panel] quit requested from the page");
             await stop();
-            return server.close(() => process.exit(0));
+            releasePidFile();
+
+            /**
+             * `server.close()` is not enough on its own, and relying on it left
+             * the supervisor in a limbo worse than the bug this replaces: the
+             * bot stopped, the page said "Desligado", and the process stayed up
+             * holding the port, so the next `Volk.command` found it busy.
+             *
+             * Two reasons. It only stops *new* connections and then waits for
+             * open ones, and every watching page holds an `/events` stream that
+             * is designed never to end. And a keep-alive socket that is already
+             * established still gets answered, so even `/health` replied on it.
+             *
+             * So: end the streams ourselves, then close, then exit on a timer
+             * regardless. Quitting must not be able to fail.
+             */
+            for (const stream of clients) {
+                try {
+                    stream.end();
+                } catch {
+                    // Already gone; nothing to close.
+                }
+            }
+            clients.clear();
+
+            server.closeIdleConnections?.();
+            server.close(() => process.exit(0));
+            // Last resort, if a socket still refuses to go.
+            setTimeout(() => process.exit(0), 1500).unref();
+            return;
         }
     }
 
@@ -336,12 +504,40 @@ setInterval(() => {
     }
 }, 20000).unref();
 
+openLog();
+
 // Loopback only. The child's environment holds the Discord token, and the panel
 // can start and stop it, so this must never answer the network.
 server.listen(PORT, "127.0.0.1", () => {
+    claimPidFile();
+    push("sys", `[panel] supervisor up, pid ${process.pid}, port ${PORT}`);
     console.log(`Volk control panel: http://localhost:${PORT}`);
     if (process.env.VOLK_AUTOSTART !== "0") start();
 });
+
+/**
+ * Watchdog on the listening socket.
+ *
+ * This is the failure that prompted the whole change: the page stopped
+ * answering while the process was still alive, so there was nothing to
+ * restart and nothing to read. Only `EADDRINUSE` exits below; every other
+ * socket error is logged and carried on from, which can leave this process
+ * running with no listener at all: alive, and unreachable.
+ *
+ * Rather than guess which errors those are, this checks the observable fact
+ * every 15 seconds and listens again if the socket has gone. Re-listening on
+ * a healthy server is a no-op we never reach, since `server.listening` is the
+ * guard.
+ */
+setInterval(() => {
+    if (server.listening) return;
+    push("sys", "[panel] listener is gone, reopening");
+    try {
+        server.listen(PORT, "127.0.0.1");
+    } catch (e) {
+        push("sys", `[panel] could not reopen: ${e.message}`);
+    }
+}, 15000).unref();
 
 server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
@@ -382,13 +578,18 @@ process.on("unhandledRejection", (e) => {
 // If the supervisor ever does go down, say so on the way out. Its absence was
 // the only symptom before: the page simply stopped updating.
 process.on("exit", (code) => {
+    // A pidfile outliving its process would make `Volk.command` think a dead
+    // supervisor is live and refuse to start one.
+    releasePidFile();
     if (code !== 0) console.error(`[panel] supervisor exiting with code ${code}`);
 });
 
 /** Quitting the supervisor takes the bot with it: a bot left holding the
  *  gateway with nothing watching it is the exact situation this replaces. */
 async function shutdown() {
+    push("sys", "[panel] shutting down");
     await stop();
+    releasePidFile();
     process.exit(0);
 }
 process.on("SIGINT", shutdown);

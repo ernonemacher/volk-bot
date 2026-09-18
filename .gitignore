@@ -12,6 +12,10 @@ preview-*.jpg
 preview-*.png
 *.log
 
+# Supervisor runtime: log, pidfile, and the locally compiled menu bar helper
+logs/
+tools/menubar/VolkStatus.app/
+
 .DS_Store
 
 # Working notes, kept local: Portuguese product and planning documents

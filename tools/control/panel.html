@@ -277,6 +277,9 @@
       <button class="go" id="b-start">Ligar</button>
       <button id="b-stop">Desligar</button>
       <button id="b-restart">Reiniciar</button>
+      <!-- The supervisor runs detached with no terminal window, so this is the
+           only way to take it down. -->
+      <button class="ghost" id="b-quit" title="Desliga o bot e o supervisor">Desligar tudo</button>
     </div>
   </div>
 
@@ -539,6 +542,23 @@
   $("b-start").onclick = () => post("/start");
   $("b-stop").onclick = () => post("/stop");
   $("b-restart").onclick = () => post("/restart");
+
+  /**
+   * Quits the supervisor as well as the bot, which is the end of the service
+   * until someone double-clicks Volk.command again. Confirmed because the
+   * button sits next to three reversible ones and this one is not.
+   */
+  $("b-quit").onclick = async () => {
+    if (!confirm("Desligar o bot e o supervisor? O painel para de responder até você abrir o Volk.command de novo.")) return;
+    $("b-quit").disabled = true;
+    // The reply arrives before the process goes, so the page is told to stop
+    // pretending it still has a supervisor rather than waiting for a timeout.
+    try { await post("/quit"); } catch {}
+    down = true;
+    $("verdict").className = "verdict";
+    $("v-head").textContent = "Desligado";
+    $("v-detail").textContent = "abra o Volk.command para subir de novo";
+  };
   $("b-clear").onclick = () => {
     log.innerHTML = '<div class="empty">sem linhas ainda</div>';
     logEmpty = true;
@@ -579,7 +599,7 @@
       $("verdict").className = "verdict bad";
       $("v-head").textContent = "Sem contato com o supervisor";
       $("v-detail").textContent =
-        "reconectando… se não voltar, a janela do Volk.command foi fechada ou o supervisor caiu";
+        "reconectando… se não voltar, abra o Volk.command (ou veja logs/panel.log)";
     };
   }
   connect();
