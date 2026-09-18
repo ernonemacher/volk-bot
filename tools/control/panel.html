@@ -544,8 +544,28 @@
     logEmpty = true;
   };
 
+  /**
+   * Keeps the stream up, and says so when it is not.
+   *
+   * EventSource reconnects on its own, but only while the server is answering;
+   * if the supervisor is gone it retries quietly forever and the page just sits
+   * there looking fine. So a failure is stated on screen, and the retry keeps
+   * going so it recovers by itself once the supervisor is back.
+   */
+  let es = null;
+  let down = false;
+
   function connect() {
-    const es = new EventSource("/events");
+    if (es) es.close();
+    es = new EventSource("/events");
+
+    es.onopen = () => {
+      if (down) {
+        down = false;
+        poll();     // catch up on whatever happened while we were blind
+        repaint();
+      }
+    };
     es.addEventListener("state", (m) => {
       state = JSON.parse(m.data);
       $("b-start").disabled = state.running;
@@ -553,13 +573,22 @@
       repaint();
     });
     es.addEventListener("line", (m) => addLine(JSON.parse(m.data)));
+
     es.onerror = () => {
+      down = true;
       $("verdict").className = "verdict bad";
-      $("v-head").textContent = "Supervisor fora do ar";
-      $("v-detail").textContent = "rode Volk.command de novo para voltar";
+      $("v-head").textContent = "Sem contato com o supervisor";
+      $("v-detail").textContent =
+        "reconectando… se não voltar, a janela do Volk.command foi fechada ou o supervisor caiu";
     };
   }
   connect();
+
+  // EventSource gives up for good in some browsers after repeated failures, so
+  // a dead stream is rebuilt rather than waited on.
+  setInterval(() => {
+    if (es && es.readyState === EventSource.CLOSED) connect();
+  }, 10000);
 </script>
 </body>
 </html>

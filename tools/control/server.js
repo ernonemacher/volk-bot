@@ -49,6 +49,13 @@ function push(stream, text) {
         const line = raw.trimEnd();
         if (!line) continue;
 
+        // The supervisor's own events go to the terminal as well as to the
+        // page. They used to exist only in this buffer and in whatever browser
+        // happened to be watching, so a panel that broke while nobody had the
+        // tab open left nothing at all behind to explain it. The child's own
+        // output is not echoed: it is already on its way to this stdout.
+        if (stream === "sys") console.log(line);
+
         const entry = { seq: seq++, at: now(), stream, line };
         lines.push(entry);
         while (lines.length > MAX_LINES) lines.shift();
@@ -158,17 +165,35 @@ function stop() {
     dying.kill("SIGTERM");
 
     return new Promise((resolve) => {
+        // Resolve once, whichever path gets there first. The exit listener
+        // alone was not enough: a child that had already gone never fires it
+        // again, and `await stop()` in shutdown and restart then hung forever,
+        // leaving the panel unable to restart the bot or quit.
+        let settled = false;
+        const done = (ok, why) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(hard);
+            clearTimeout(giveUp);
+            resolve(why ? { ok, why } : { ok });
+        };
+
         const hard = setTimeout(() => {
-            if (!dying.killed) {
+            if (dying.exitCode === null && dying.signalCode === null) {
                 push("sys", "[panel] did not stop in time, forcing");
                 dying.kill("SIGKILL");
             }
         }, 8000);
 
-        dying.once("exit", () => {
-            clearTimeout(hard);
-            resolve({ ok: true });
-        });
+        // Even SIGKILL can leave us waiting if the process is unkillable (a
+        // stuck syscall). Answering late is better than never answering.
+        const giveUp = setTimeout(() => done(false, "did not exit"), 12000);
+
+        dying.once("exit", () => done(true));
+        dying.once("error", () => done(false, "error while stopping"));
+
+        // Already gone between the check above and the signal.
+        if (dying.exitCode !== null || dying.signalCode !== null) done(true);
     });
 }
 
@@ -179,8 +204,24 @@ async function restart() {
 
 // --- http ------------------------------------------------------------------
 
+/**
+ * Writes one SSE frame, dropping the subscriber if the socket has gone.
+ *
+ * A browser tab that closes leaves a response whose socket is already dead, and
+ * the write that follows raises ECONNRESET. Unguarded that escapes as an
+ * unhandled error, which in Node 20 takes the whole supervisor down — the panel
+ * going quiet with its terminal still open.
+ */
 function send(res, event, data) {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    try {
+        if (res.writableEnded || res.destroyed) {
+            clients.delete(res);
+            return;
+        }
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch {
+        clients.delete(res);
+    }
 }
 
 const json = (res, body, status = 200) => {
@@ -188,7 +229,26 @@ const json = (res, body, status = 200) => {
     res.end(JSON.stringify(body));
 };
 
-const server = createServer(async (req, res) => {
+/**
+ * Every request runs inside this, because the handler is async: a rejected
+ * promise in it (an unreadable panel.html, a database read racing a
+ * checkpoint) becomes an unhandledRejection, and Node 20 exits the process on
+ * those by default. The supervisor must outlive anything a single request can
+ * do to it — its whole job is to still be there when something went wrong.
+ */
+const server = createServer((req, res) => {
+    handle(req, res).catch((e) => {
+        push("sys", `[panel] request failed: ${e.message}`);
+        try {
+            if (!res.headersSent) res.writeHead(500);
+            res.end("internal error");
+        } catch {
+            // The socket is already gone; nothing left to answer on.
+        }
+    });
+});
+
+async function handle(req, res) {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     if (url.pathname === "/") {
@@ -227,7 +287,11 @@ const server = createServer(async (req, res) => {
         send(res, "state", snapshot());
         // The backlog, so a page opened late still explains how we got here.
         for (const entry of lines) send(res, "line", entry);
+        // Both ends: `close` fires when the socket goes, `error` when it goes
+        // badly, and a subscriber left in the set is written to forever.
         req.on("close", () => clients.delete(res));
+        req.on("error", () => clients.delete(res));
+        res.on("error", () => clients.delete(res));
         return;
     }
 
@@ -250,7 +314,27 @@ const server = createServer(async (req, res) => {
     }
 
     res.writeHead(404).end("not found");
-});
+}
+
+/**
+ * A comment frame down every open stream, every 20 seconds.
+ *
+ * An idle SSE connection carries no traffic at all, and a browser that has
+ * suspended a background tab, or anything between it and here, can drop it
+ * without either side noticing. The page then looks alive and simply stops
+ * updating — the failure being fixed. A heartbeat both keeps the connection
+ * warm and lets the browser's EventSource notice a dead one and reconnect.
+ */
+setInterval(() => {
+    for (const res of clients) {
+        try {
+            if (res.writableEnded || res.destroyed) clients.delete(res);
+            else res.write(": ping\n\n");
+        } catch {
+            clients.delete(res);
+        }
+    }
+}, 20000).unref();
 
 // Loopback only. The child's environment holds the Discord token, and the panel
 // can start and stop it, so this must never answer the network.
@@ -266,7 +350,39 @@ server.on("error", (e) => {
         );
         process.exit(1);
     }
-    throw e;
+    // Reported, not rethrown: a throw here is an uncaught exception, and the
+    // supervisor dying is worse than any error a listening socket can report.
+    console.error(`[panel] server error: ${e.message}`);
+});
+
+// Individual sockets raise their own errors — a browser tab closing mid-write
+// is the ordinary case — and an unhandled one of those ends the process.
+server.on("clientError", (e, socket) => {
+    socket.destroy();
+});
+
+/**
+ * Last line of defence. The panel exists to still be running when something
+ * else broke, so it says what happened and carries on rather than exiting on a
+ * fault in one request or one dead socket.
+ *
+ * Deliberately not a blanket "ignore everything": each of these is logged where
+ * the terminal and the page can both see it, which is what was missing when the
+ * panel went quiet and left nothing behind to explain it.
+ */
+process.on("uncaughtException", (e) => {
+    console.error(`[panel] uncaught: ${e.stack ?? e.message}`);
+    push("sys", `[panel] uncaught: ${e.message}`);
+});
+process.on("unhandledRejection", (e) => {
+    console.error(`[panel] unhandled rejection: ${e?.stack ?? e}`);
+    push("sys", `[panel] unhandled rejection: ${e?.message ?? e}`);
+});
+
+// If the supervisor ever does go down, say so on the way out. Its absence was
+// the only symptom before: the page simply stopped updating.
+process.on("exit", (code) => {
+    if (code !== 0) console.error(`[panel] supervisor exiting with code ${code}`);
 });
 
 /** Quitting the supervisor takes the bot with it: a bot left holding the
