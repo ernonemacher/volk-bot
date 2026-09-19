@@ -306,21 +306,42 @@ export function laneState(layerData, picked = [], perspective = "team1", layerNa
         }
     };
 
-    for (const key of picked) confirm(key);
-    pinSettled();
+    /**
+     * Confirms every depth that has only one possible point, in order.
+     *
+     * Each confirmation opens the following depth, so this repeats until a
+     * depth has a real choice in it.
+     */
+    const cascade = () => {
+        for (let guard = 0; guard <= flags.length; guard++) {
+            const result = solver.solve(constraints(), reversed);
+            const step = openStep(confirmed);
+            const candidates = flags.filter(
+                (f) => !confirmed.some((c) => c.key === f.key) && stepsOf(result, f.ids).includes(step),
+            );
+            if (candidates.length !== 1 || !confirm(candidates[0].key)) break;
+            // The cascade can settle an out-of-order confirmation: once the
+            // steps around it are taken, its own stops being ambiguous.
+            pinSettled();
+        }
+    };
 
-    // If only one point can still fill the next open depth, confirm it for the
-    // user, cascading: each confirmation opens the following depth.
-    for (let guard = 0; guard <= flags.length; guard++) {
-        const result = solver.solve(constraints(), reversed);
-        const step = openStep(confirmed);
-        const candidates = flags.filter(
-            (f) => !confirmed.some((c) => c.key === f.key) && stepsOf(result, f.ids).includes(step),
-        );
-        if (candidates.length !== 1 || !confirm(candidates[0].key)) break;
-        // The cascade can settle an out-of-order confirmation: once the steps
-        // around it are taken, its own stops being ambiguous.
+    // Cascade before each pick, not only after the last one.
+    //
+    // `confirm` pins to the next depth nobody occupies, and a forced step the
+    // cascade has not run yet still counts as free. On Tallil RAAS v1 the
+    // first step has a single candidate (Eridu, which owns one objectName per
+    // route), so a member's first pick is really the second step: it was
+    // offered depth 1, could not hold it, and was stored with no depth at all.
+    // A second pick did the same, and with both ambiguous `pinSettled` had
+    // nothing to settle, leaving the panel with an empty menu and five steps
+    // unwalked. Running the cascade first means each pick is offered a depth
+    // that is genuinely open.
+    cascade();
+    for (const key of picked) {
+        confirm(key);
         pinSettled();
+        cascade();
     }
 
     const result = solver.solve(constraints(), reversed);

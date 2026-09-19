@@ -24,6 +24,10 @@ import {
     keypadOf,
     laneState,
     needsPerspective,
+    // Used as the fallback when a walked key is no longer among the live
+    // flags. Missing from this list, that line threw a ReferenceError that
+    // took the whole embed down as "refresh failed".
+    shortName,
     unitNameOf,
 } from "./layer.js";
 import { listServers, squadcalcUrl } from "./servers.js";
