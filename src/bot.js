@@ -370,6 +370,13 @@ export async function repaint(guildId, { republish = false } = {}) {
     if (!panel || panel.channelId !== config.channelId) {
         if (panel) {
             stopAuto(panel);
+            // Wait for whatever is already rendering before touching the
+            // messages. `discardMessages` nulls both ids, and a refresh still
+            // in flight reads that as "they are gone" and posts a fresh pair
+            // into the channel we are leaving: two messages nobody owns, never
+            // updated and never cleaned up, which is the frozen panel this
+            // branch exists to prevent.
+            await panel.queue.catch(() => {});
             // Clear the old channel first. A panel left behind keeps showing a
             // frozen match and reads as the live one.
             await discardMessages(panel).catch(() => {});
@@ -459,7 +466,9 @@ client.once("clientReady", async () => {
                 .fetch(process.env.DISCORD_CHANNEL_ID)
                 .catch(() => null);
             if (channel?.guildId === guildId) {
-                await saveGuild(guildId, { ...config, channelId: channel.id });
+                // Only the field that changed: `config` is a snapshot, and
+                // writing all of it would revert anything saved since.
+                await saveGuild(guildId, { channelId: channel.id });
                 console.log(`[BOT] guild ${guildId}: adopted #${channel.name} from DISCORD_CHANNEL_ID`);
             }
         }
@@ -582,7 +591,9 @@ client.on("interactionCreate", async (i) => {
         panel.picked = [];
         panel.lastRenderKey = null;
         // Survives a restart: which server to watch is a choice, not state.
-        await saveGuild(i.guildId, { ...config, serverId: panel.serverId });
+        // Only this field, so a config read earlier in the interaction cannot
+        // put back whatever an admin changed in the meantime.
+        await saveGuild(i.guildId, { serverId: panel.serverId });
     }
     if (i.customId === "flag") {
         // Late interactions are real: someone picks an option that a layer
@@ -615,14 +626,27 @@ function startRetention() {
     setInterval(purge, 86400000).unref();
 }
 
+/** Guards against a second pass: see `shutdown`. */
+let stopping = false;
+
 async function shutdown() {
+    // Two triggers can arrive together, and routinely do: the supervisor sends
+    // SIGTERM and then exits, which `watchSupervisor` notices. Without this,
+    // the second pass runs `track` after the first already called
+    // `closeTelemetry`, which reopens the database and recreates the WAL that
+    // was just checkpointed away, defeating the reason for closing it.
+    if (stopping) return;
+    stopping = true;
+
     console.log("\n[BOT] shutting down");
     for (const panel of panels.values()) stopAuto(panel);
     track("lifecycle", { action: "shutdown" });
     // Closed before exit so WAL is checkpointed into the database file rather
     // than left for the next boot to recover.
     closeTelemetry();
-    await client.destroy();
+    // Exit even if the gateway refuses to close: the caller is a signal or a
+    // dead supervisor, and staying up is the failure being avoided.
+    await client.destroy().catch((e) => console.error(`[BOT] destroy failed: ${e.message}`));
     process.exit(0);
 }
 process.on("SIGINT", shutdown);
@@ -652,7 +676,13 @@ function watchSupervisor() {
             process.kill(parent, 0);
         } catch {
             console.log(`[BOT] supervisor ${parent} is gone, exiting`);
-            shutdown();
+            // Unawaited by nature (an interval), so its failure has to be
+            // handled here or it surfaces as an unhandledRejection and the
+            // process never reaches the exit this exists to perform.
+            shutdown().catch((e) => {
+                console.error(`[BOT] shutdown failed: ${e.message}`);
+                process.exit(1);
+            });
         }
     }, 5000).unref();
 }

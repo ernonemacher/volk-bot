@@ -219,7 +219,20 @@ function missingPermissions(i, channel) {
  */
 export async function handleCommand(i, repaint) {
     const cfg = await guildConfig(i.guildId);
-    const save = () => saveGuild(i.guildId, cfg);
+    /**
+     * Persists only the fields this command touched.
+     *
+     * `cfg` is a snapshot read before `deferReply` and a network round trip,
+     * so handing all of it to `saveGuild` wrote stale values back over
+     * anything saved in between: an admin running one command reverted the
+     * server a member had just picked from the panel. Naming the fields keeps
+     * a write narrow enough that concurrent edits do not collide.
+     */
+    const save = (...fields) =>
+        saveGuild(
+            i.guildId,
+            Object.fromEntries(fields.map((f) => [f, cfg[f]])),
+        );
     const redraw = (opts) => repaint(i.guildId, opts);
 
     if (!isAdmin(i, cfg)) {
@@ -256,7 +269,7 @@ export async function handleCommand(i, repaint) {
         }
 
         cfg.channelId = channel.id;
-        await save();
+        await save("channelId");
         await i.reply(ephemeral(`This server's panel goes to <#${channel.id}>. Publishing...`));
         await redraw();
         return i.editReply(`Panel published in <#${channel.id}>.`);
@@ -298,7 +311,7 @@ export async function handleCommand(i, repaint) {
         }
 
         const what = level === "admin" ? "configure the bot" : "operate the panel";
-        await save();
+        await save("roles");
         return i.reply(
             ephemeral(
                 action === "allow"
@@ -363,7 +376,7 @@ export async function handleCommand(i, repaint) {
         const interval = i.options.getInteger("interval");
         if (interval !== null) cfg.auto.intervalSeconds = interval;
 
-        await save();
+        await save("auto");
         await i.reply(
             ephemeral(
                 cfg.auto.active
@@ -382,7 +395,7 @@ export async function handleCommand(i, repaint) {
             );
         }
         cfg.language = code;
-        await save();
+        await save("language");
         await i.reply(ephemeral(`Panel language: **${code}**. Refreshing...`));
         return redraw();
     }
@@ -408,7 +421,7 @@ export async function handleCommand(i, repaint) {
             state.name.replace(/\s+/g, " ").trim().slice(0, 45);
 
         cfg.pinned.push({ id, label });
-        await save();
+        await save("pinned");
         await i.editReply(`Pinned **${label}** (\`${id}\`). Refreshing the panel...`);
         return redraw();
     }
@@ -422,7 +435,7 @@ export async function handleCommand(i, repaint) {
             return i.reply(ephemeral(`\`${id}\` was not pinned.`));
         }
 
-        await save();
+        await save("pinned");
         await i.reply(ephemeral(`Removed \`${id}\`. Refreshing the panel...`));
         return redraw();
     }
@@ -490,7 +503,7 @@ export async function handleCommand(i, repaint) {
 
         if (!channel) {
             cfg.logChannelId = null;
-            await save();
+            await save("logChannelId");
             return i.reply(ephemeral("Relato de falhas **desligado**."));
         }
         if (!channel.isTextBased?.()) {
@@ -510,7 +523,7 @@ export async function handleCommand(i, repaint) {
         }
 
         cfg.logChannelId = channel.id;
-        await save();
+        await save("logChannelId");
         return i.reply(
             ephemeral(
                 `Falhas vão para <#${channel.id}>. ` +

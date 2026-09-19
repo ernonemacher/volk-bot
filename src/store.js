@@ -202,12 +202,38 @@ export async function saveGuild(guildId, config) {
     const { guildId: _ignored, ...record } = config;
 
     if (!db) {
-        memory.guilds.set(guildId, record);
+        memory.guilds.set(guildId, { ...(memory.guilds.get(guildId) ?? {}), ...record });
         return config;
     }
-    db.prepare(
-        "INSERT INTO guilds(guild_id, record) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET record = excluded.record",
-    ).run(guildId, JSON.stringify(record));
+
+    /**
+     * Merged over what is on disk, not written over it.
+     *
+     * Every caller here is a read-modify-write: it reads a whole config,
+     * changes one field and hands the whole thing back. Writing that wholesale
+     * meant the last writer reverted whatever anyone else had changed since it
+     * read. The window is wide, because a slash command awaits `deferReply` and
+     * a network call between the two: an admin running `/volk logchannel` while
+     * a member picked a server from the menu silently put the old server back.
+     *
+     * A shallow merge is enough. No caller removes a key: they replace values,
+     * including arrays they filtered and fields they set to null, and a
+     * replacement value wins over the stored one.
+     */
+    try {
+        const row = db.prepare("SELECT record FROM guilds WHERE guild_id = ?").get(guildId);
+        const stored = row ? JSON.parse(row.record) : {};
+        db.prepare(
+            "INSERT INTO guilds(guild_id, record) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET record = excluded.record",
+        ).run(guildId, JSON.stringify({ ...stored, ...record }));
+    } catch (e) {
+        // Configuration must not vanish on a bad read of the existing row, so
+        // fall back to writing what the caller gave us.
+        console.error(`[STORE] merge for guild ${guildId} failed: ${e.message}`);
+        db.prepare(
+            "INSERT INTO guilds(guild_id, record) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET record = excluded.record",
+        ).run(guildId, JSON.stringify(record));
+    }
     return config;
 }
 
