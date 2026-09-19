@@ -70,7 +70,21 @@ fi
 # launcher can beat it to the punch, and starting a second bot on the same token
 # means two clients editing the same two messages per guild. So wait for the
 # orphan to go, and insist if it does not.
-ORPHANS="$(pgrep -f 'node src/bot.js' 2>/dev/null || true)"
+# Only processes running THIS checkout. `pgrep -f 'node src/bot.js'` matches a
+# command line, and that line is relative: it would also match a bot started
+# from another copy of the repo, or any unrelated project with a src/bot.js,
+# and this function kills what it finds. So each candidate is confirmed by its
+# working directory before being signalled.
+HERE="$(pwd)"
+orphan_pids() {
+    local pid cwd
+    for pid in $(pgrep -f 'node src/bot.js' 2>/dev/null); do
+        cwd="$(lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | grep '^n' | sed 's/^n//')"
+        [ "$cwd" = "$HERE" ] && echo "$pid"
+    done
+}
+
+ORPHANS="$(orphan_pids)"
 if [ -n "$ORPHANS" ]; then
     echo "Encontrei bot(s) órfão(s) de uma execução anterior: $(echo "$ORPHANS" | tr '\n' ' ')"
     echo "Encerrando antes de subir…"
@@ -78,9 +92,9 @@ if [ -n "$ORPHANS" ]; then
     kill -TERM $ORPHANS 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         sleep 0.5
-        pgrep -f 'node src/bot.js' >/dev/null 2>&1 || break
+        [ -z "$(orphan_pids)" ] && break
     done
-    STILL="$(pgrep -f 'node src/bot.js' 2>/dev/null || true)"
+    STILL="$(orphan_pids)"
     if [ -n "$STILL" ]; then
         # shellcheck disable=SC2086
         kill -9 $STILL 2>/dev/null || true

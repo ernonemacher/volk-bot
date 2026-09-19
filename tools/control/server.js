@@ -139,6 +139,8 @@ const clients = new Set();
 let child = null;
 let startedAt = null;
 let lastExit = null;
+/** True once the port has been taken successfully at least once. */
+let booted = false;
 
 /** What the log has told us about the bot's own state. */
 const bot = { tag: null, guilds: new Map(), errors: 0 };
@@ -509,6 +511,7 @@ openLog();
 // Loopback only. The child's environment holds the Discord token, and the panel
 // can start and stop it, so this must never answer the network.
 server.listen(PORT, "127.0.0.1", () => {
+    booted = true;
     claimPidFile();
     push("sys", `[panel] supervisor up, pid ${process.pid}, port ${PORT}`);
     console.log(`Volk control panel: http://localhost:${PORT}`);
@@ -541,10 +544,20 @@ setInterval(() => {
 
 server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
-        console.error(
-            `Port ${PORT} is busy: the panel may already be open at http://localhost:${PORT}`,
-        );
-        process.exit(1);
+        // Before the first successful listen this means another panel owns the
+        // port, and a second one must not start. After it, the same error comes
+        // from the watchdog re-listening into a port something else grabbed
+        // while the socket was down, and exiting there would take a running bot
+        // off Discord over a transient conflict. So: say it, keep the bot, and
+        // let the watchdog try again.
+        if (!booted) {
+            console.error(
+                `Port ${PORT} is busy: the panel may already be open at http://localhost:${PORT}`,
+            );
+            process.exit(1);
+        }
+        push("sys", `[panel] port ${PORT} is busy, will retry`);
+        return;
     }
     // Reported, not rethrown: a throw here is an uncaught exception, and the
     // supervisor dying is worse than any error a listening socket can report.
