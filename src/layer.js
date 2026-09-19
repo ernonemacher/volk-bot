@@ -271,7 +271,43 @@ export function laneState(layerData, picked = [], perspective = "team1", layerNa
         return true;
     };
 
+    /**
+     * Gives a depth to confirmations that were made out of order, once the
+     * solver leaves them only one.
+     *
+     * A flag confirmed deeper than the next open step is stored with no depth,
+     * because pinning it to its shallowest option would discard the routes
+     * carrying it further along. But `openStep` counts pinned depths only, so
+     * that step stays "open" even though the point occupying it is already
+     * confirmed. Filling the steps before it then left the panel asking for a
+     * depth nothing could fill: no candidate, an empty menu, and a lane that
+     * read as finished with a dozen points still live and `routeComplete`
+     * false. Confirming Antenna Compound and then Alma on Manicouagan RAAS v2
+     * was enough to reach it.
+     *
+     * Narrowing is what makes this safe: once a confirmation has a single
+     * remaining option, pinning it there discards nothing.
+     */
+    const pinSettled = () => {
+        for (let pass = 0; pass <= confirmed.length; pass++) {
+            const result = solver.solve(constraints(), reversed);
+            let settled = false;
+            for (const c of confirmed) {
+                if (c.step != null) continue;
+                const options = stepsOf(result, c.ids);
+                if (options.length !== 1) continue;
+                // One pin per pass: it changes the constraints, so the rest are
+                // judged against a solve that no longer reflects them.
+                c.step = options[0];
+                settled = true;
+                break;
+            }
+            if (!settled) return;
+        }
+    };
+
     for (const key of picked) confirm(key);
+    pinSettled();
 
     // If only one point can still fill the next open depth, confirm it for the
     // user, cascading: each confirmation opens the following depth.
@@ -282,6 +318,9 @@ export function laneState(layerData, picked = [], perspective = "team1", layerNa
             (f) => !confirmed.some((c) => c.key === f.key) && stepsOf(result, f.ids).includes(step),
         );
         if (candidates.length !== 1 || !confirm(candidates[0].key)) break;
+        // The cascade can settle an out-of-order confirmation: once the steps
+        // around it are taken, its own stops being ambiguous.
+        pinSettled();
     }
 
     const result = solver.solve(constraints(), reversed);
@@ -321,7 +360,15 @@ export function laneState(layerData, picked = [], perspective = "team1", layerNa
         currentPosition: nextStep,
         routeComplete,
         stepCount: solver.stepCount,
-        walk: confirmed.map((c) => c.key),
+        // Ordered by depth, not by click. Confirmations are unordered by
+        // design, and printing them as they arrived drew the lane out of
+        // sequence (Antenna Compound, then Alma, then the Lumber Mill that
+        // sits between them). One still without a depth keeps its position
+        // rather than being pushed to either end.
+        walk: confirmed
+            .map((c, i) => ({ key: c.key, step: c.step, i }))
+            .sort((a, b) => (a.step ?? Infinity) - (b.step ?? Infinity) || a.i - b.i)
+            .map((c) => c.key),
         alive,
         nextFlags: alive.filter((f) => f.next && !f.taken),
         // How much of the layer is still open, which is the headline number.
