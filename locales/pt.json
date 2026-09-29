@@ -23,6 +23,6 @@
     "reason.offline": "servidor offline ou fora da lista",
     "reason.seed": "layer de seed ou não reconhecida",
     "panel.routes": "Rotas restantes",
-    "warn.notAllowed": "Voce nao tem um cargo liberado para operar este painel.",
-    "warn.noPanel": "Ainda nao ha painel neste servidor. Um admin cria com /volk setup."
+    "warn.notAllowed": "Você não tem um cargo liberado para operar este painel.",
+    "warn.noPanel": "Ainda não há painel neste servidor. Um admin cria com /volk setup."
 }
