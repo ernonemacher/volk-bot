@@ -10,6 +10,7 @@
 
 import { MessageFlags, PermissionsBitField, SlashCommandBuilder } from "discord.js";
 
+import { linkIndex, loadGuide } from "./guide.js";
 import { isValidLanguage, availableLanguages } from "./i18n.js";
 import { LEVELS, grantRole, isAdmin, revokeRole, rolesFor } from "./permissions.js";
 import { AUTO_MAX, AUTO_MIN, fetchServerState, listServers } from "./servers.js";
@@ -143,6 +144,14 @@ const COMMAND = new SlashCommandBuilder()
     )
     .addSubcommand((s) =>
         s
+            .setName("guide")
+            .setDescription("Post the usage guide (docs/guia), replacing the previous one")
+            .addChannelOption((o) =>
+                o.setName("channel").setDescription("Guide channel (default: the current one), not the panel one"),
+            ),
+    )
+    .addSubcommand((s) =>
+        s
             .setName("stats")
             .setDescription("Usage and errors recorded by the bot")
             .addStringOption((o) =>
@@ -187,6 +196,12 @@ export async function registerCommands(client, guildId) {
 
 const ephemeral = (content) => ({ content, flags: MessageFlags.Ephemeral });
 
+// On boot `adoptMessages` deletes every bot message in the panel channel that
+// is not the panel pair, so a guide there would vanish on the next restart.
+const GUIDE_BESIDE_PANEL =
+    "The guide and the panel cannot share a channel: on restart the bot deletes " +
+    "its own messages in the panel channel that are not the panel. Pick another channel.";
+
 /**
  * What the bot still needs in a channel to run a panel there.
  *
@@ -203,12 +218,21 @@ const NEEDED = {
     ManageMessages: "Manage Messages",
 };
 
-function missingPermissions(i, channel) {
+/** The guide is posted once and pinned, never edited, so it needs less. */
+const GUIDE_NEEDED = {
+    ViewChannel: "View Channel",
+    SendMessages: "Send Messages",
+    AttachFiles: "Attach Files",
+    ReadMessageHistory: "Read Message History",
+    PinMessages: "Pin Messages",
+};
+
+function missingPermissions(i, channel, needed = NEEDED) {
     const me = i.guild?.members?.me;
     if (!me) return [];
     const allowed = channel.permissionsFor(me);
     if (!allowed) return [];
-    return Object.entries(NEEDED)
+    return Object.entries(needed)
         .filter(([flag]) => !allowed.has(PermissionsBitField.Flags[flag]))
         .map(([, label]) => label);
 }
@@ -266,6 +290,9 @@ export async function handleCommand(i, repaint) {
                         "Grant those and run the command again.",
                 ),
             );
+        }
+        if (channel.id === cfg.guide?.channelId) {
+            return i.reply(ephemeral(GUIDE_BESIDE_PANEL));
         }
 
         cfg.channelId = channel.id;
@@ -325,6 +352,64 @@ export async function handleCommand(i, repaint) {
         await i.reply(ephemeral("Publishing the panel again..."));
         await redraw({ republish: true });
         return i.editReply("Panel republished.");
+    }
+
+    if (sub === "guide") {
+        const channel = i.options.getChannel("channel") ?? i.channel;
+        if (!channel?.isTextBased?.()) {
+            return i.reply(ephemeral("Pick a text channel."));
+        }
+        if (channel.id === cfg.channelId) {
+            return i.reply(ephemeral(GUIDE_BESIDE_PANEL));
+        }
+        const missing = missingPermissions(i, channel, GUIDE_NEEDED);
+        if (missing.length) {
+            return i.reply(
+                ephemeral(
+                    `I am missing **${missing.join("**, **")}** in <#${channel.id}>. ` +
+                        "Grant those and run the command again.",
+                ),
+            );
+        }
+
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        // Loaded before anything is sent or deleted: a broken file must not
+        // cost the guild the guide it already has.
+        const posts = await loadGuide(cfg);
+        const index = posts.find((p) => p.id === "00");
+        if (!index) throw new Error("docs/guia has no 00 index file");
+
+        // Mentions render as names but ping nobody: posting the guide is not
+        // a reason to notify every operator.
+        const quiet = { allowedMentions: { parse: [] } };
+        const sent = [];
+        try {
+            for (const post of posts.filter((p) => p !== index)) {
+                const message = await channel.send({ content: post.text, files: post.files, ...quiet });
+                sent.push([post.id, message]);
+            }
+            const urls = Object.fromEntries(sent.map(([id, m]) => [id, m.url]));
+            const top = await channel.send({ content: linkIndex(index.text, urls), ...quiet });
+            sent.push([index.id, top]);
+            await top.pin();
+        } catch (e) {
+            // All or nothing: half a guide would not be recorded, so the next
+            // run could not clean it up.
+            for (const [, m] of sent) await m.delete().catch(() => {});
+            throw e;
+        }
+
+        // Removed only after the new one landed, so a failure above leaves the
+        // guild with its old guide rather than none.
+        const previous = cfg.guide;
+        if (previous?.messageIds?.length) {
+            const old = await i.client.channels.fetch(previous.channelId).catch(() => null);
+            for (const id of previous.messageIds) await old?.messages?.delete(id).catch(() => {});
+        }
+
+        cfg.guide = { channelId: channel.id, messageIds: sent.map(([, m]) => m.id) };
+        await save("guide");
+        return i.editReply(`Guide posted in <#${channel.id}>, index pinned: ${sent.at(-1)[1].url}`);
     }
 
     if (sub === "config") {

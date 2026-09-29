@@ -9,4 +9,4 @@ O Volk mostra no Discord qual bandeira pode vir a seguir em RAAS e Invasion. Lev
 4. [Operando o painel]({{04}})
 5. [Quando algo parece errado]({{05}})
 
-**Painel:** <#1549934479408111717>
+**Painel:** {{painel}}

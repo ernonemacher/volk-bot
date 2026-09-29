@@ -3,7 +3,7 @@
 ## Operando o painel
 Com este post você confirma as bandeiras durante a partida.
 
-**Quem pode:** só quem tem o cargo de operador do Volk. Sem ele, o painel avisa que você não tem um cargo liberado.
+**Quem pode:** {{operadores}}
 
 **Na partida:**
 1. **Servidor:** confira se é o servidor em que vocês estão. A estrela marca os servidores fixados pelo clã; os outros estão em partida agora.

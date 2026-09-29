@@ -125,6 +125,7 @@ not share anything except which servers are currently in a match.
 | `/volk discovery` | Include servers currently in a match, with a minimum player count |
 | `/volk search` | Find a server id by name |
 | `/volk republish` | Post the panel again, for when it was deleted or got stuck |
+| `/volk guide` | Post the Portuguese usage guide from `docs/guia/` in a channel other than the panel's, pin its index, and replace the previous copy |
 
 Commands work from any channel, so configuring does not clutter the panel.
 

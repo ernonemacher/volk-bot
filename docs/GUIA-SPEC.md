@@ -36,20 +36,30 @@ Cada post é escrito aqui no repositório como um arquivo Markdown já no format
 
 Duas formas, a partir dos mesmos arquivos:
 
-- **À mão:** você abre cada arquivo de `docs/guia/`, cola na sua conta e anexa os prints listados no topo do arquivo. Serve para a primeira publicação e para servidores onde o bot não tem permissão de postar no canal do guia.
-- **`/volk guia`:** o bot posta a sequência inteira num canal. Serve para republicar quando o painel mudar e para outros servidores que usam o Volk.
+- **À mão:** `node src/guide.js <guildId> 01 | pbcopy` copia o post 01 já preenchido para o servidor escolhido; cola na sua conta e anexa os prints que o comando lista no stderr. O índice (`00`) sai com `{{01}}`..`{{05}}`, trocados à mão pelos links das mensagens depois de postar.
+- **`/volk guide`:** o bot posta a sequência inteira num canal. Serve para republicar quando o painel mudar e para outros servidores que usam o Volk.
 
-Comportamento de `/volk guia`:
+Os arquivos têm dois marcadores, preenchidos por [guide.js](../src/guide.js) com a configuração de cada servidor, para um texto só servir a todos:
+
+- `{{painel}}`: menção ao canal do painel.
+- `{{operadores}}`: "só quem tem o cargo @X. Sem ele, ..." com os cargos de operador, ou "qualquer pessoa no canal." quando não há nenhum.
+
+Menção a canal não notifica ninguém. Menção a cargo notifica quando cola à mão, se o cargo for mencionável ou se quem posta tiver permissão de mencionar todos; começar a mensagem com `@silent` evita a notificação. O `/volk guide` manda com `allowedMentions` vazio, que mostra o nome do cargo e não notifica.
+
+Comportamento de `/volk guide` ([commands.js](../src/commands.js)):
 
 - Só admin (mesmo nível de `/volk setup`).
-- Opção `canal`, padrão o canal atual. Recusa o canal do painel, pelo motivo acima.
-- Verifica antes de postar as permissões Ver Canal, Enviar Mensagens, Anexar Arquivos, Ler Histórico e Fixar Mensagens, e nomeia a que falta, como o `/volk setup` já faz.
-- Posta os posts 1 a 5 em ordem, cada um com seus prints como anexos soltos, e por último o índice com os links das mensagens. Fixa o índice.
-- Rodar de novo no mesmo canal apaga a versão anterior do guia e posta a nova, para o canal nunca ter dois guias. Para isso guarda os ids das mensagens do guia na configuração do servidor, pelo `saveGuild`.
-- Resposta efêmera ao admin com o link do índice, no mesmo idioma das outras respostas de admin em [commands.js](../src/commands.js) (hoje inglês, menos `/volk logchannel`).
+- Opção `channel`, padrão o canal atual, no mesmo padrão dos outros subcomandos. Recusa o canal do painel, pelo motivo acima; o `/volk setup` recusa, pelo mesmo motivo, o canal do guia.
+- Verifica antes de postar as permissões View Channel, Send Messages, Attach Files, Read Message History e Pin Messages, e nomeia a que falta, como o `/volk setup` já faz.
+- Carrega e valida os arquivos antes de tocar no canal: um post acima de 2000 caracteres falha sem apagar o guia que já existe.
+- Posta os posts 01 a 05 em ordem, cada um com seus prints como anexos soltos, e por último o índice com os links das mensagens. Fixa o índice.
+- Tudo ou nada: se um envio falha no meio, apaga o que já tinha postado e mantém o guia anterior.
+- Só depois que o novo entrou, apaga a versão anterior, esteja no mesmo canal ou em outro, para o servidor nunca ter dois guias. Os ids ficam em `guide: {channelId, messageIds}` na configuração do servidor, pelo `saveGuild`.
+- Resposta efêmera ao admin com o link do índice, em inglês como as outras respostas de admin.
+- O aviso "Volk fixou uma mensagem" que o Discord cria ao fixar fica no canal; em cada republicação aparece mais um.
 - O post de admin não é publicado pelo comando: ele vai à mão para o canal da staff.
 
-Formato de cada arquivo em `docs/guia/`: uma linha de cabeçalho com os prints do post (`<!-- prints: P2-mapa-inicio.jpg, P3-mapa-2-confirmacoes.jpg -->`), depois o texto exatamente como vai para o Discord. O comando lê esse cabeçalho para saber o que anexar; quem cola à mão lê o mesmo cabeçalho.
+Formato de cada arquivo em `docs/guia/`: uma linha de cabeçalho com os prints do post (`<!-- prints: P2-mapa-inicio.jpg, P3-mapa-2-confirmacoes.jpg -->`), depois o texto exatamente como vai para o Discord. Só os arquivos `NN-*.md` entram no comando; `admin.md` fica de fora.
 
 ## Estrutura do conteúdo
 
@@ -177,6 +187,4 @@ Decisões tomadas em 29/09:
 - Post de admin: canal da staff, publicado à mão.
 - Acentos de `warn.notAllowed` e `warn.noPanel` em [locales/pt.json](../locales/pt.json) corrigidos antes das capturas.
 
-Perguntas em aberto:
-
-- [ ] O post 4 cita o nome do cargo de operador do clã, ou fica "o cargo de operador do Volk"? O clã restringe a operação a um cargo, e quem não tem vê "Você não tem um cargo liberado".
+Perguntas em aberto: nenhuma. O post 4 cita o cargo de operador pelo marcador `{{operadores}}` (decidido em 29/09).
