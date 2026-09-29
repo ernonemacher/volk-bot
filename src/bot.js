@@ -157,34 +157,33 @@ async function refresh(panel) {
         }
 
         const key = renderKey(panel, status);
-        const needsImage = key !== panel.lastRenderKey;
-        const image = needsImage
-            ? (
-                  await timed(
-                      "render",
-                      {
-                          guildId: panel.guildId,
-                          serverId: panel.serverId,
-                          layer: panel.layerName,
-                          gamemode: state?.gamemode,
-                          // laneState zeroes stepCount and lanes on its
-                          // degenerate branch (linear modes, or an unsolved
-                          // board). Without these two flags those zeros read as
-                          // real measurements in any later query.
-                          linear: state?.linear ?? null,
-                          solver_ok: state ? state.stepCount > 0 : null,
-                          picked: panel.picked.length,
-                          lanes_alive: state?.lanes?.alive ?? null,
-                          lanes_total: state?.lanes?.total ?? null,
-                      },
-                      () =>
-                          renderLayer(panel.layerName, panel.picked, {
-                              perspective: panel.perspective,
-                              factions: { team1: status.team1, team2: status.team2 },
-                          }),
-                  )
-              ).image
-            : null;
+        const render = async () =>
+            (
+                await timed(
+                    "render",
+                    {
+                        guildId: panel.guildId,
+                        serverId: panel.serverId,
+                        layer: panel.layerName,
+                        gamemode: state?.gamemode,
+                        // laneState zeroes stepCount and lanes on its
+                        // degenerate branch (linear modes, or an unsolved
+                        // board). Without these two flags those zeros read as
+                        // real measurements in any later query.
+                        linear: state?.linear ?? null,
+                        solver_ok: state ? state.stepCount > 0 : null,
+                        picked: panel.picked.length,
+                        lanes_alive: state?.lanes?.alive ?? null,
+                        lanes_total: state?.lanes?.total ?? null,
+                    },
+                    () =>
+                        renderLayer(panel.layerName, panel.picked, {
+                            perspective: panel.perspective,
+                            factions: { team1: status.team1, team2: status.team2 },
+                        }),
+                )
+            ).image;
+        let image = key !== panel.lastRenderKey ? await render() : null;
 
         await publishText(
             panel,
@@ -192,7 +191,11 @@ async function refresh(panel) {
             buildEmbed({ panel, status: { ...status, live: true }, state, label, t, layerChanged }),
             await buildComponents(panel, state, t, status, config),
         );
-        if (needsImage) {
+        // publishText drops the map when it has to recreate the text message,
+        // so the map comes back below it; without a render here it would stay
+        // missing until the next pass.
+        if (!image && !panel.mapMessageId) image = await render();
+        if (image) {
             await publishMap(panel, channel, image);
             panel.lastRenderKey = key;
         }
@@ -268,6 +271,15 @@ async function editOrCreate(panel, channel, key, payload) {
         panel[key] = null;
         panel.lastRenderKey = null; // the image has to go up again
     }
+    // Discord orders messages by creation, and an edit never moves one. A text
+    // message created while the map is still in the channel lands under it and
+    // inverts the panel for good, since every later pass only edits the two.
+    if (key === "textMessageId") {
+        await dropMap(panel, channel);
+        // Maps orphaned by a delete that failed quietly (republish, discard)
+        // sit above the new text just the same.
+        await deleteOwnMessages(channel);
+    }
     const message = await channel.send(fresh);
     panel[key] = message.id;
 }
@@ -286,6 +298,26 @@ const publishMap = (panel, channel, image, fallback = "") =>
         attachments: [],
         files: image ? [new AttachmentBuilder(image, { name: `map-${Date.now()}.jpg` })] : [],
     });
+
+/**
+ * Deletes the map message so the next publishMap posts a fresh one below the
+ * text. Anything but "Unknown Message" throws: a map left in place by a failed
+ * delete is exactly the inversion this exists to prevent, so the pass is
+ * abandoned and retried rather than carried on.
+ */
+async function dropMap(panel, channel) {
+    if (panel.mapMessageId) {
+        const map = await channel.messages.fetch(panel.mapMessageId).catch((e) => {
+            if (isUnknownMessage(e)) return null;
+            throw e;
+        });
+        await map?.delete().catch((e) => {
+            if (!isUnknownMessage(e)) throw e;
+        });
+    }
+    panel.mapMessageId = null;
+    panel.lastRenderKey = null;
+}
 
 /** Removes a panel's two messages from whatever channel they are in. */
 async function discardMessages(panel) {
@@ -326,20 +358,22 @@ async function reconcileMessages(panel, channel) {
         // Both go, not just the text: a new text message would land *under* the
         // surviving map and invert the panel.
         panel.textMessageId = null;
-        if (panel.mapMessageId) {
-            await channel.messages
-                .fetch(panel.mapMessageId)
-                .then((m) => m.delete())
-                .catch(() => {});
-        }
-        panel.mapMessageId = null;
-        panel.lastRenderKey = null;
+        await dropMap(panel, channel);
         return;
     }
 
     if (!(await alive(panel.mapMessageId))) {
         panel.mapMessageId = null;
         panel.lastRenderKey = null;
+        return;
+    }
+
+    // Undoes an inversion from any cause, including one adopted on boot: before
+    // this nothing checked the order, so a panel inverted once stayed inverted
+    // across every restart. Snowflake ids grow with creation time.
+    if (BigInt(panel.mapMessageId) < BigInt(panel.textMessageId)) {
+        console.warn(`[BOT] guild ${panel.guildId}: map above the text, reposting it`);
+        await dropMap(panel, channel);
     }
 }
 
@@ -348,10 +382,7 @@ async function reconcileMessages(panel, channel) {
  * edits the panel in place instead of stacking a new one.
  */
 async function adoptMessages(panel, channel) {
-    const recent = await channel.messages.fetch({ limit: 50 });
-    const mine = [...recent.values()]
-        .filter((m) => m.author.id === client.user.id)
-        .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+    const mine = await ownMessages(channel);
 
     const text = mine.find((m) => m.embeds.length > 0);
     // Not `attachments.size > 0`: offline the map message carries the reason as
@@ -361,8 +392,19 @@ async function adoptMessages(panel, channel) {
     panel.textMessageId = text?.id ?? null;
     panel.mapMessageId = map?.id ?? null;
 
-    const keep = new Set([text?.id, map?.id].filter(Boolean));
-    for (const m of mine.filter((m) => !keep.has(m.id))) {
+    await deleteOwnMessages(channel, new Set([text?.id, map?.id].filter(Boolean)), mine);
+}
+
+/** The bot's own messages among the channel's last 50, newest first. */
+async function ownMessages(channel) {
+    const recent = await channel.messages.fetch({ limit: 50 });
+    return [...recent.values()]
+        .filter((m) => m.author.id === client.user.id)
+        .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+}
+
+async function deleteOwnMessages(channel, keep = new Set(), mine = null) {
+    for (const m of (mine ?? (await ownMessages(channel))).filter((m) => !keep.has(m.id))) {
         await m.delete().catch(() => {});
         await new Promise((r) => setTimeout(r, 350));
     }

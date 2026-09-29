@@ -59,6 +59,7 @@ src/permissions.js  roles                     -> admin / operator
 src/bot.js          Discord client            -> orchestrates the above
 src/commands.js     /volk slash command       -> admin config, writes the store
 src/i18n.js         locales/                  -> translator(lng)
+src/guide.js        docs/guia/                -> the usage guide as messages, for /volk guide
 ```
 
 **Two API bases, on purpose.** `layer.js` exports `API_URL` and defaults to `beta.squadcalc.app/api`; `servers.js` re-exports it rather than picking its own. Pointing them at different builds made every modded server look unplayable, because production reports `mapName: null` for modded layers while the layer endpoint has full data. Beta is the `dev` branch and can break without notice.
@@ -93,6 +94,7 @@ It enumerates every route from main to main up front (capped at `MAX_ROUTES` 200
 - Renders are serialised **per guild** through `enqueue`. Two passes editing the same two messages interleave badly; guilds do not share a queue so a slow one cannot stall everyone.
 - `adoptMessages` claims the bot's own messages on boot and deletes leftovers; `reconcileMessages` notices ones a member deleted mid-match. The text message is identified by *having* an embed and the map by *not* having one, because offline the map message carries plain text and no file.
 - If the text message is gone, the map message is deleted too: a new text message would land under the surviving map and invert the panel.
+- **A text message is never created while a map is in the channel.** Discord orders messages by creation and an edit never moves one, so an inversion used to be permanent: every later pass only edited the pair, and `adoptMessages` re-adopted it on each boot. Now `editOrCreate` drops the map and sweeps the bot's leftover messages before posting a fresh text message, and `reconcileMessages` compares the two snowflake ids on every pass and reposts a map found above the text (`map above the text, reposting it` in the log). `dropMap` throws on anything but Unknown Message, because a map a failed delete left in place is the inversion itself.
 - `syncLayer` only **stages** a layer change; `commitLayer` closes it once the publish landed. Without the two steps, a refresh that adopted a new layer and then failed left the old map on screen until the next rotation.
 - Select menus cap at 25 options; `listServers` and the flag menu both slice to that. The flag menu lists only candidates for the next depth even though the solver accepts any order.
 - Picks are validated through `canPick` before being trusted: interactions arrive late for options a layer change already invalidated.
@@ -122,7 +124,7 @@ Two layers per language in `locales/`:
 - `_terms_<lng>.json` — domain labels (`teams`, `players`, `Faction`, `Layer`) copied from SquadCalc itself, so the panel uses the same word the member sees in the app.
 - `<lng>.json` — the bot's own phrases, which override the imported terms.
 
-Missing keys fall back to `en`, then to the key itself, so an incomplete language degrades instead of breaking. Keys live under the English namespace (`panel.*`, `warn.*`, `reason.*`, `select.*`, `button.*`). Add every new key to all seven languages (`de en fr pt ru uk zh`); a missing one falls back to English and then to the raw key, which is what users see if you forget. Admin replies in `src/commands.js` are hardcoded Portuguese and bypass i18n entirely.
+Missing keys fall back to `en`, then to the key itself, so an incomplete language degrades instead of breaking. Keys live under the English namespace (`panel.*`, `warn.*`, `reason.*`, `select.*`, `button.*`). Add every new key to all seven languages (`de en fr pt ru uk zh`); a missing one falls back to English and then to the raw key, which is what users see if you forget. Admin replies in `src/commands.js` are hardcoded, mostly English (`stats`, `logchannel` and `forget` answer in Portuguese), and bypass i18n entirely. The guide in `docs/guia/` is Portuguese only; `{{painel}}` and `{{operadores}}` in it are filled per guild by `src/guide.js`, and `node src/guide.js <guildId> [NN]` prints a post ready to paste by hand.
 
 ## Docs and legacy files
 
