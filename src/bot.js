@@ -81,6 +81,23 @@ const renderKey = (p, status) =>
 
 // --- refresh ---------------------------------------------------------------
 
+// Logged only on the way back from a failure, so tools/control/server.js can
+// clear the guild's failing state without a line per healthy pass filling the
+// log buffer.
+function noteRecovered(panel) {
+    if (!panel.failing) return;
+    panel.failing = false;
+    console.log(`[BOT] guild ${panel.guildId}: refresh recovered`);
+}
+
+// Same reasoning: one line per change of the watched server, so the menu bar
+// can tell "bot healthy, nothing to show" from "bot healthy, match on".
+function noteServer(panel, live) {
+    if (panel.serverLive === live) return;
+    panel.serverLive = live;
+    console.log(`[BOT] guild ${panel.guildId}: server ${live ? "live" : "offline"}`);
+}
+
 async function refresh(panel) {
     panel.rendering = true;
     panel.renderingSince = Date.now();
@@ -118,6 +135,8 @@ async function refresh(panel) {
                 players: status.players ?? null,
                 ok: false,
             });
+            noteServer(panel, false);
+            noteRecovered(panel);
             return;
         }
 
@@ -178,7 +197,10 @@ async function refresh(panel) {
             panel.lastRenderKey = key;
         }
         commitLayer(panel);
+        noteServer(panel, true);
+        noteRecovered(panel);
     } catch (e) {
+        panel.failing = true;
         // This exact wording is parsed by tools/control/server.js to mark the
         // guild as failing. Telemetry goes beside it, never in place of it.
         console.error(`[BOT] refresh failed for guild ${panel.guildId}:`, e.message);
@@ -453,6 +475,7 @@ function rearmAuto(panel, config) {
     const seconds = Math.min(Math.max(config.auto.intervalSeconds ?? 60, AUTO_MIN), AUTO_MAX);
     panel.autoTimer = setInterval(() => {
         enqueue(panel, () => refresh(panel)).catch((e) => {
+            panel.failing = true;
             console.error(`[BOT] auto refresh failed for guild ${panel.guildId}:`, e.message);
             trackError("auto", e, { guildId: panel.guildId, serverId: panel.serverId });
         });

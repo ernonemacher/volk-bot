@@ -25,7 +25,8 @@ command -v swiftc >/dev/null 2>&1 || {
 }
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp ../../assets/icon-app-1024.png "$APP/Contents/Resources/"
 
 # The repo path is baked in: the helper has to find Volk.command to offer
 # "Ligar", and it cannot ask a supervisor that is not running where it lives.

@@ -78,7 +78,7 @@ fi
 HERE="$(pwd)"
 orphan_pids() {
     local pid cwd
-    for pid in $(pgrep -f 'node src/bot.js' 2>/dev/null); do
+    for pid in $(pgrep -f '^[^ ]*node src/bot\.js$' 2>/dev/null); do
         cwd="$(lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | grep '^n' | sed 's/^n//')"
         [ "$cwd" = "$HERE" ] && echo "$pid"
     done
@@ -112,9 +112,17 @@ mkdir -p "$LOG_DIR"
 # Detached, and with stdio pointed at the log: no controlling terminal means
 # closing this window cannot signal it, and a redirect means its output has
 # somewhere to go now that no window is reading it.
-nohup node tools/control/server.js >>"$LOG_FILE" 2>&1 &
-PANEL_PID=$!
-disown "$PANEL_PID" 2>/dev/null
+# Under launchd (tools/control/launchagent.sh), launchd owns the supervisor: a
+# copy started here would fight it for the port.
+DOMAIN="gui/$(id -u)"
+if launchctl print "$DOMAIN/app.volk.supervisor" >/dev/null 2>&1; then
+    launchctl kickstart "$DOMAIN/app.volk.supervisor"
+    PANEL_PID=""
+else
+    nohup node tools/control/server.js >>"$LOG_FILE" 2>&1 &
+    PANEL_PID=$!
+    disown "$PANEL_PID" 2>/dev/null
+fi
 
 # Confirm it actually came up before claiming success and closing the window.
 # Reporting "no ar" for a process that died on boot is the failure mode this
@@ -127,14 +135,16 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 
         # The menu bar helper, if it has been built. Optional on purpose: the
         # service must not depend on a Swift binary being present.
-        if [ -x tools/menubar/VolkStatus.app/Contents/MacOS/VolkStatus ]; then
+        if launchctl print "$DOMAIN/app.volk.status" >/dev/null 2>&1; then
+            launchctl kickstart "$DOMAIN/app.volk.status"
+        elif [ -x tools/menubar/VolkStatus.app/Contents/MacOS/VolkStatus ]; then
             open tools/menubar/VolkStatus.app
         fi
 
         close_window
         exit 0
     fi
-    kill -0 "$PANEL_PID" 2>/dev/null || break
+    [ -n "$PANEL_PID" ] && { kill -0 "$PANEL_PID" 2>/dev/null || break; }
 done
 
 echo "O supervisor não respondeu em ${URL}/health. Últimas linhas do log:"

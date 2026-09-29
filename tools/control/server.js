@@ -26,7 +26,7 @@
  * must not be reachable from the network.
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import {
     createWriteStream,
@@ -139,11 +139,18 @@ const clients = new Set();
 let child = null;
 let startedAt = null;
 let lastExit = null;
+/** Set by stop() so an exit we asked for is not mistaken for a crash. */
+let stopping = false;
+let respawnTimer = null;
+let respawnDelay = 0;
 /** True once the port has been taken successfully at least once. */
 let booted = false;
 
 /** What the log has told us about the bot's own state. */
 const bot = { tag: null, guilds: new Map(), errors: 0 };
+// Kept apart from `bot.guilds` because the bot's first refresh, which reports
+// the server, prints before "panel on #", which creates the guild entry.
+const serverLive = new Map();
 
 const now = () => Date.now();
 
@@ -183,6 +190,7 @@ function interpret(line, stream) {
     if (m) {
         bot.tag = m[1];
         bot.guilds.clear();
+        serverLive.clear();
         return;
     }
 
@@ -208,7 +216,18 @@ function interpret(line, stream) {
     if (m) {
         const g = bot.guilds.get(m[1]);
         if (g) g.state = "failing";
+        return;
     }
+
+    m = line.match(/\[BOT\] guild (\d+): refresh recovered/);
+    if (m) {
+        const g = bot.guilds.get(m[1]);
+        if (g?.state === "failing") g.state = "ok";
+        return;
+    }
+
+    m = line.match(/\[BOT\] guild (\d+): server (live|offline)/);
+    if (m) serverLive.set(m[1], m[2] === "live");
 }
 
 const snapshot = () => ({
@@ -221,10 +240,15 @@ const snapshot = () => ({
     guilds: [...bot.guilds.values()],
 });
 
+const offlineGuilds = () => [...bot.guilds.keys()].filter((id) => serverLive.get(id) === false).length;
+
 // --- process control -------------------------------------------------------
 
 function start() {
     if (child) return { ok: false, why: "already running" };
+    clearTimeout(respawnTimer);
+    respawnTimer = null;
+    stopping = false;
 
     bot.tag = null;
     bot.guilds.clear();
@@ -252,10 +276,19 @@ function start() {
     child.stderr.on("data", (d) => push("err", d));
 
     child.on("exit", (code, signal) => {
+        const ranFor = now() - startedAt;
         lastExit = { code, signal, at: now() };
         child = null;
         startedAt = null;
         push("sys", `[panel] bot exited (${signal ?? `code ${code}`})`);
+
+        // A crash used to be final: on 26/09 an unhandled ECONNRESET left the
+        // bot down for 21 h with the supervisor idle beside it. Backoff so a
+        // bot that dies on boot (bad token, no network) does not spin.
+        if (stopping || (code === 0 && !signal)) return;
+        respawnDelay = ranFor > 10 * 60000 ? 5000 : Math.min(Math.max(respawnDelay * 2, 5000), 60000);
+        push("sys", `[panel] bot crashed, restarting in ${respawnDelay / 1000}s`);
+        respawnTimer = setTimeout(start, respawnDelay);
     });
 
     child.on("error", (e) => push("sys", `[panel] could not start: ${e.message}`));
@@ -270,9 +303,12 @@ function start() {
  * still there after the grace period.
  */
 function stop() {
+    clearTimeout(respawnTimer);
+    respawnTimer = null;
     if (!child) return Promise.resolve({ ok: false, why: "not running" });
 
     const dying = child;
+    stopping = true;
     push("sys", "[panel] stopping");
     dying.kill("SIGTERM");
 
@@ -307,6 +343,51 @@ function stop() {
         // Already gone between the check above and the signal.
         if (dying.exitCode !== null || dying.signalCode !== null) done(true);
     });
+}
+
+/**
+ * Bots of this checkout still running from a supervisor that was killed.
+ *
+ * Volk.command reaps these before starting a supervisor, but under launchd it
+ * is not in the path: launchd relaunched a kill -9'd supervisor in 1 s, while
+ * the orphan takes up to 5 s to notice, and for those seconds two bots edited
+ * the same messages. Matched by working directory, not only by command line,
+ * so a bot from another copy of the repo is left alone.
+ */
+function orphanBots() {
+    let pids;
+    try {
+        pids = // Anchored on the executable: unanchored, it also matched any shell whose
+        // command line merely mentioned node src/bot.js, and signalled it.
+        pids = execFileSync("pgrep", ["-f", "^[^ ]*node src/bot\\.js$"], { encoding: "utf8" });
+    } catch {
+        return []; // pgrep exits 1 when nothing matches
+    }
+    return pids
+        .split("\n")
+        .filter(Boolean)
+        .filter((pid) => {
+            try {
+                const out = execFileSync("lsof", ["-a", "-d", "cwd", "-p", pid, "-Fn"], { encoding: "utf8" });
+                return out.split("\n").includes(`n${ROOT}`);
+            } catch {
+                return false;
+            }
+        })
+        .map(Number);
+}
+
+async function reapOrphans() {
+    let pids = orphanBots();
+    if (!pids.length) return;
+    push("sys", `[panel] stopping orphaned bot(s) ${pids.join(" ")}`);
+    const signal = (sig) => pids.forEach((pid) => { try { process.kill(pid, sig); } catch {} });
+    signal("SIGTERM");
+    for (let i = 0; i < 10 && pids.length; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        pids = orphanBots();
+    }
+    signal("SIGKILL");
 }
 
 async function restart() {
@@ -429,6 +510,9 @@ async function handle(req, res) {
                 errors: snap.errors,
                 guilds: snap.guilds.length,
                 failing: snap.guilds.filter((g) => g.state !== "ok").length,
+                // Guilds whose watched server has no match to draw: the bot is
+                // fine, the panel just has nothing useful on it.
+                offline: offlineGuilds(),
                 lastExit: snap.lastExit,
             },
         });
@@ -515,7 +599,7 @@ server.listen(PORT, "127.0.0.1", () => {
     claimPidFile();
     push("sys", `[panel] supervisor up, pid ${process.pid}, port ${PORT}`);
     console.log(`Volk control panel: http://localhost:${PORT}`);
-    if (process.env.VOLK_AUTOSTART !== "0") start();
+    if (process.env.VOLK_AUTOSTART !== "0") reapOrphans().then(start);
 });
 
 /**

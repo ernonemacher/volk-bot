@@ -8,10 +8,12 @@
 //  fact rather than the presence of a window: it polls GET /health and colours
 //  a menu bar item from the reply.
 //
-//  Three states, deliberately distinguished, because they call for different
+//  Four states, deliberately distinguished, because they call for different
 //  actions:
 //
 //    green   the supervisor answers and the bot is running
+//    blue    the bot is fine, but every watched server is offline or seeding:
+//            nothing is wrong, the Discord panel just has no match to show
 //    yellow  the supervisor answers, the bot is not running (or a guild is
 //            failing): open the page and press Ligar
 //    red     no reply at all: the supervisor is down, run Volk.command
@@ -43,12 +45,14 @@ struct Health {
     var botTag: String?
     var guilds = 0
     var failing = 0
+    var offline = 0
     var panelPid = 0
     var bootedAt: Double = 0
 }
 
 enum State {
     case up(Health)      // supervisor answers, bot running
+    case idle(Health)    // bot running, every watched server offline
     case degraded(Health) // supervisor answers, bot down or guilds failing
     case down            // no reply
 }
@@ -60,7 +64,9 @@ final class Indicator: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "◍"
+        // Keeps a position chosen with Cmd+drag across launches. A new item
+        // lands leftmost, which on a notched screen is behind the notch.
+        item.autosaveName = "app.volk.status"
         item.menu = NSMenu()
         render()
 
@@ -103,6 +109,7 @@ final class Indicator: NSObject, NSApplicationDelegate {
         h.botTag = bot["tag"] as? String
         h.guilds = bot["guilds"] as? Int ?? 0
         h.failing = bot["failing"] as? Int ?? 0
+        h.offline = bot["offline"] as? Int ?? 0
         if let panel = root["panel"] as? [String: Any] {
             h.panelPid = panel["pid"] as? Int ?? 0
             h.bootedAt = panel["bootedAt"] as? Double ?? 0
@@ -111,7 +118,9 @@ final class Indicator: NSObject, NSApplicationDelegate {
         // A running bot with every guild failing is not "up": it holds the
         // gateway and refreshes nothing, which looks fine from Discord's side
         // and is the state worth a different colour.
-        if h.botRunning && h.failing == 0 { return .up(h) }
+        if h.botRunning && h.failing == 0 {
+            return h.guilds > 0 && h.offline == h.guilds ? .idle(h) : .up(h)
+        }
         if h.botRunning || h.panelPid > 0 { return .degraded(h) }
         return .down
     }
@@ -121,18 +130,22 @@ final class Indicator: NSObject, NSApplicationDelegate {
     private func render() {
         guard let button = item.button else { return }
 
+        let color: NSColor
         switch state {
-        case .up:       button.title = "🟢 Volk"
-        case .degraded: button.title = "🟡 Volk"
-        case .down:     button.title = "🔴 Volk"
+        case .up:       color = .systemGreen
+        case .idle:     color = .systemBlue
+        case .degraded: color = .systemYellow
+        case .down:     color = .systemRed
         }
+        button.image = Self.icon(color)
+        button.title = ""
 
         let menu = NSMenu()
         menu.addItem(headline())
         menu.addItem(.separator())
 
         switch state {
-        case .up, .degraded:
+        case .up, .idle, .degraded:
             menu.addItem(action("Abrir painel", #selector(openPanel)))
             menu.addItem(action("Reiniciar bot", #selector(restartBot)))
             menu.addItem(.separator())
@@ -147,12 +160,42 @@ final class Indicator: NSObject, NSApplicationDelegate {
         item.menu = menu
     }
 
+    /// The Volk logo with a status dot on its lower right corner.
+    ///
+    /// Replaces the "🟢 Volk" title: at ~60 pt it was the first item a full
+    /// menu bar pushed behind the notch, and it vanished without a trace.
+    private static let logo: NSImage? = Bundle.main
+        .url(forResource: "icon-app-1024", withExtension: "png")
+        .flatMap { NSImage(contentsOf: $0) }
+
+    private static func icon(_ color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 21, height: 18), flipped: false) { _ in
+            // The PNG is a circle on a black square; clip so the corners do not show.
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(ovalIn: NSRect(x: 0.5, y: 0.5, width: 17, height: 17)).addClip()
+            logo?.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
+            NSGraphicsContext.restoreGraphicsState()
+            let dot = NSBezierPath(ovalIn: NSRect(x: 13, y: 0.5, width: 7.5, height: 7.5))
+            color.setFill()
+            dot.fill()
+            // A dark rim so yellow and green still read on a light menu bar.
+            NSColor.black.withAlphaComponent(0.55).setStroke()
+            dot.lineWidth = 1
+            dot.stroke()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
     private func headline() -> NSMenuItem {
         let text: String
         switch state {
         case .up(let h):
             let who = h.botTag ?? "conectando…"
             text = "No ar: \(who) · \(h.guilds) guild(s)"
+        case .idle(let h):
+            text = "Bot no ar, servidor offline em \(h.offline) guild(s)"
         case .degraded(let h):
             if !h.botRunning {
                 text = "Supervisor no ar, bot desligado"
