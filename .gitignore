@@ -10,6 +10,7 @@ config.json.migrated
 # Generated output
 preview-*.jpg
 preview-*.png
+.screenshots/
 *.log
 
 # Supervisor runtime: log, pidfile, and the locally compiled menu bar helper

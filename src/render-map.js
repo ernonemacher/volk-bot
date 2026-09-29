@@ -77,7 +77,7 @@ const STYLE = {
 };
 
 /** Black frame carrying the keypad letters and numbers, as in SquadCalc. */
-const MARGIN = 58;
+export const MARGIN = 58;
 
 /**
  * Layers whose exported border is wrong: in game it is overwritten by a mask
@@ -356,7 +356,7 @@ function walkPath(state, project) {
         .join("");
 }
 
-function gridStep(layerData, width) {
+export function gridStep(layerData, width) {
     const [c0, c1] = layerData.mapTextureCorners;
     const metres = Math.abs(c1.location_x - c0.location_x) / 100;
     return (KEYPAD_METRES / metres) * width;
