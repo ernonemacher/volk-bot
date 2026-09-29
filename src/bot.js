@@ -16,7 +16,14 @@
  */
 
 import "dotenv/config";
-import { AttachmentBuilder, Client, GatewayIntentBits, MessageFlags } from "discord.js";
+import {
+    AttachmentBuilder,
+    Client,
+    DiscordAPIError,
+    GatewayIntentBits,
+    MessageFlags,
+    RESTJSONErrorCodes,
+} from "discord.js";
 
 import { AUTO_MAX, AUTO_MIN, fetchServerState, labelFor } from "./servers.js";
 import { guildConfig, saveGuild, saveGuildIdentity } from "./store.js";
@@ -208,6 +215,9 @@ async function refresh(panel) {
 
 // --- message plumbing ------------------------------------------------------
 
+const isUnknownMessage = (e) =>
+    e instanceof DiscordAPIError && e.code === RESTJSONErrorCodes.UnknownMessage;
+
 async function editOrCreate(panel, channel, key, payload) {
     // `attachments: []` means "drop what is already attached", which only makes
     // sense on an edit. Sent alongside an upload on a fresh message it
@@ -215,17 +225,26 @@ async function editOrCreate(panel, channel, key, payload) {
     const { attachments: _onlyForEdits, ...fresh } = payload;
 
     if (panel[key]) {
+        // Only Discord itself can say a message is unusable. A network failure
+        // (DNS, timeout) says nothing about it, and forgetting the id then left
+        // the old panel in the channel under a freshly posted one.
+        const message = await channel.messages.fetch(panel[key]).catch((e) => {
+            if (isUnknownMessage(e)) return null;
+            throw e;
+        });
         try {
-            const message = await channel.messages.fetch(panel[key]);
-            await message.edit(payload);
-            return;
+            if (message) {
+                await message.edit(payload);
+                return;
+            }
         } catch (e) {
-            // Deleted by someone, or an edit that referenced an attachment
-            // Discord no longer holds. Either way the id is unusable.
-            console.warn(`[BOT] ${key} unusable, reposting: ${e.message.split("\n")[0]}`);
-            panel[key] = null;
-            panel.lastRenderKey = null; // the image has to go up again
+            if (!(e instanceof DiscordAPIError)) throw e;
+            // An edit that referenced an attachment Discord no longer holds.
+            await message.delete().catch(() => {});
         }
+        console.warn(`[BOT] ${key} unusable, reposting`);
+        panel[key] = null;
+        panel.lastRenderKey = null; // the image has to go up again
     }
     const message = await channel.send(fresh);
     panel[key] = message.id;
@@ -269,8 +288,17 @@ async function discardMessages(panel) {
  * as the layer holds.
  */
 async function reconcileMessages(panel, channel) {
+    // Throws on anything but "Unknown Message", so a network blip skips the
+    // pass instead of reading as a deleted panel.
     const alive = async (id) =>
-        Boolean(id) && (await channel.messages.fetch(id).then(() => true, () => false));
+        Boolean(id) &&
+        (await channel.messages.fetch(id).then(
+            () => true,
+            (e) => {
+                if (isUnknownMessage(e)) return false;
+                throw e;
+            },
+        ));
 
     if (!(await alive(panel.textMessageId))) {
         // Both go, not just the text: a new text message would land *under* the
