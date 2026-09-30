@@ -11,7 +11,9 @@
 #
 # So the supervisor is now started detached, with its output redirected to
 # logs/panel.log, and this window closes itself. Nothing is left running in the
-# terminal, and the two honest signals are the menu bar helper and the page.
+# terminal, and the two honest signals are the menu bar item and the page.
+# With Volk.app installed (tools/menubar/build.sh) both are the app, and this
+# script is the fallback for a machine without it.
 # Shutting down is the "Desligar tudo" button on the page (or tools/control/volkctl stop).
 
 cd "$(dirname "$0")" || exit 1
@@ -30,6 +32,12 @@ close_window() {
         osascript -e 'tell application "Terminal" to close (every window whose frontmost is true)' \
             >/dev/null 2>&1 &
     fi
+}
+
+# The app's window when it is installed, the browser otherwise.
+APP="$HOME/Applications/Volk.app"
+open_ui() {
+    if [ -d "$APP" ]; then open "$APP"; else open "$URL"; fi
 }
 
 fail() {
@@ -60,7 +68,7 @@ command -v node >/dev/null 2>&1 || fail "Node não encontrado. Instale com: brew
 # exists: one left behind by a supervisor that was killed says nothing.
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
     echo "Volk já está no ar (pid $(cat "$PID_FILE")). Abrindo o painel."
-    open "$URL"
+    open_ui
     close_window
     exit 0
 fi
@@ -131,16 +139,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 0.3
     if curl -fsS --max-time 1 "${URL}/health" >/dev/null 2>&1; then
         echo "Volk no ar: ${URL}"
-        open "$URL"
-
-        # The menu bar helper, if it has been built. Optional on purpose: the
-        # service must not depend on a Swift binary being present.
-        if launchctl print "$DOMAIN/app.volk.status" >/dev/null 2>&1; then
-            launchctl kickstart "$DOMAIN/app.volk.status"
-        elif [ -x tools/menubar/VolkStatus.app/Contents/MacOS/VolkStatus ]; then
-            open tools/menubar/VolkStatus.app
-        fi
-
+        open_ui
         close_window
         exit 0
     fi

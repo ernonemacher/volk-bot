@@ -10,6 +10,13 @@
 # indicator not being there, which is the one signal nobody notices: 23 to 25/09
 # passed with no bot and no sign of it.
 #
+# With Volk.app built, the supervisor starts through its binary (`Volk
+# --supervisor`, which execs node), so System Settings > Login Items lists it as
+# Volk. Started as node directly it was listed as "Node.js Foundation", the
+# signer of node, and was switched off there as an unknown item, which makes
+# launchd stop it on the spot. AssociatedBundleIdentifiers alone did not help:
+# macOS honours it only for a Team ID the ad-hoc signed app does not have.
+#
 # KeepAlive is SuccessfulExit=false for both: launchd relaunches a crash or a
 # kill -9, but not an exit 0, so "Desligar tudo" and "Fechar este indicador"
 # still mean off until the next login.
@@ -22,8 +29,10 @@ AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 SUPERVISOR="app.volk.supervisor"
 STATUS="app.volk.status"
-STATUS_BIN="$REPO/tools/menubar/VolkStatus.app/Contents/MacOS/VolkStatus"
+STATUS_BIN="$HOME/Applications/Volk.app/Contents/MacOS/Volk"
 PORT="${VOLK_PANEL_PORT:-7317}"
+STAGED="$(mktemp)"
+trap 'rm -f "$STAGED"' EXIT
 
 loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
 
@@ -37,11 +46,13 @@ find_node() {
     return 1
 }
 
-write_plist() { # label, then ProgramArguments
-    local label="$1"; shift
-    local args=""
+write_plist() { # file, label, env ("" or KEY=VALUE), then ProgramArguments
+    local file="$1" label="$2" env="$3"; shift 3
+    local args="" envxml=""
     for a in "$@"; do args+="        <string>$a</string>"$'\n'; done
-    cat > "$AGENTS/$label.plist" <<PLIST
+    [ -n "$env" ] && envxml="    <key>EnvironmentVariables</key>
+    <dict><key>${env%%=*}</key> <string>${env#*=}</string></dict>"
+    cat > "$file" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -58,6 +69,7 @@ $args    </array>
     </dict>
     <key>StandardOutPath</key>    <string>$REPO/logs/panel.log</string>
     <key>StandardErrorPath</key>  <string>$REPO/logs/panel.log</string>
+$envxml
 </dict>
 </plist>
 PLIST
@@ -77,22 +89,45 @@ install() {
     fi
 
     mkdir -p "$AGENTS" logs
-    write_plist "$SUPERVISOR" "$node" "$REPO/tools/control/server.js"
-    loaded "$SUPERVISOR" && launchctl bootout "$DOMAIN/$SUPERVISOR" 2>/dev/null || true
-    launchctl bootstrap "$DOMAIN" "$AGENTS/$SUPERVISOR.plist"
-    echo "Supervisor instalado: sobe no login e volta se cair."
+    if [ -x "$STATUS_BIN" ]; then
+        write_plist "$STAGED" "$SUPERVISOR" "" "$STATUS_BIN" --supervisor "$node" "$REPO/tools/control/server.js"
+    else
+        write_plist "$STAGED" "$SUPERVISOR" "" "$node" "$REPO/tools/control/server.js"
+    fi
+    if place "$SUPERVISOR"; then
+        echo "Supervisor instalado: sobe no login e volta se cair."
+    else
+        # Unchanged: rebooting it would take the bot off Discord for nothing.
+        echo "Supervisor já instalado."
+    fi
 
     if [ -x "$STATUS_BIN" ]; then
-        # The copy started by Volk.command would sit beside the agent's and
-        # draw a second icon.
+        # The helper this app replaced, if a copy is still running.
         pkill -x VolkStatus 2>/dev/null || true
-        write_plist "$STATUS" "$STATUS_BIN"
-        loaded "$STATUS" && launchctl bootout "$DOMAIN/$STATUS" 2>/dev/null || true
-        launchctl bootstrap "$DOMAIN" "$AGENTS/$STATUS.plist"
-        echo "Indicador instalado."
+        # VOLK_BACKGROUND: a launch at login draws the menu bar item, no window.
+        write_plist "$STAGED" "$STATUS" "VOLK_BACKGROUND=1" "$STATUS_BIN"
+        # Unchanged plist, but maybe a new build: restart onto it.
+        place "$STATUS" || launchctl kickstart -k "$DOMAIN/$STATUS" >/dev/null
+        echo "Volk.app instalado na barra de menus."
     else
-        echo "Indicador não compilado (tools/menubar/build.sh); instalado só o supervisor."
+        echo "Volk.app não compilado (tools/menubar/build.sh); instalado só o supervisor."
     fi
+}
+
+# Loads the plist staged in $STAGED as $1, unless the loaded one is identical.
+# Returns 1 when there was nothing to change; a failed load exits.
+place() {
+    local target="$AGENTS/$1.plist"
+    if loaded "$1" && cmp -s "$STAGED" "$target"; then return 1; fi
+    if loaded "$1"; then
+        launchctl bootout "$DOMAIN/$1" 2>/dev/null || true
+        # bootout returns before the job is gone, and a bootstrap in that
+        # window fails with "5: Input/output error". The supervisor can take
+        # up to 12 s, since it stops the bot first.
+        for _ in $(seq 1 40); do loaded "$1" || break; sleep 0.5; done
+    fi
+    mv "$STAGED" "$target"
+    launchctl bootstrap "$DOMAIN" "$target" || { echo "Falha ao carregar $1 no launchd."; exit 1; }
 }
 
 uninstall() {
@@ -100,7 +135,7 @@ uninstall() {
         loaded "$label" && launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
         rm -f "$AGENTS/$label.plist"
     done
-    echo "Removido. O Volk agora só sobe pelo Volk.command."
+    echo "Removido. O Volk agora só sobe pelo Launchpad ou pelo Volk.command."
 }
 
 status() {

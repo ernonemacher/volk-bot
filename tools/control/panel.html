@@ -578,11 +578,11 @@
 
   /**
    * Quits the supervisor as well as the bot, which is the end of the service
-   * until someone double-clicks Volk.command again. Confirmed because the
+   * until someone opens Volk (the app or Volk.command) again. Confirmed because the
    * button sits next to three reversible ones and this one is not.
    */
   $("b-quit").onclick = async () => {
-    if (!confirm("Desligar o bot e o supervisor? O painel para de responder até você abrir o Volk.command de novo.")) return;
+    if (!confirm("Desligar o bot e o supervisor? O painel para de responder até você abrir o Volk de novo.")) return;
     $("b-quit").disabled = true;
     // The reply arrives before the process goes, so the page is told to stop
     // pretending it still has a supervisor rather than waiting for a timeout.
@@ -590,7 +590,7 @@
     down = true;
     $("verdict").className = "verdict";
     $("v-head").textContent = "Desligado";
-    $("v-detail").textContent = "abra o Volk.command para subir de novo";
+    $("v-detail").textContent = "abra o Volk de novo para subir";
   };
   $("b-clear").onclick = () => {
     log.innerHTML = '<div class="empty">sem linhas ainda</div>';
@@ -632,7 +632,7 @@
       $("verdict").className = "verdict bad";
       $("v-head").textContent = "Sem contato com o supervisor";
       $("v-detail").textContent =
-        "reconectando… se não voltar, abra o Volk.command (ou veja logs/panel.log)";
+        "reconectando… se não voltar, abra o Volk de novo (ou veja logs/panel.log)";
     };
   }
   connect();
