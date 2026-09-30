@@ -781,4 +781,12 @@ function watchSupervisor() {
 }
 watchSupervisor();
 
-client.login(TOKEN);
+// A rejected login leaves nothing pending, so Node used to end the process
+// with code 0, which the supervisor reads as a deliberate stop and does not
+// retry: a crash respawned into a network still down (ENOTFOUND discord.com)
+// on 29/09 left the bot off for three hours. Non-zero, it retries with backoff.
+client.login(TOKEN).catch((e) => {
+    console.error(`[BOT] login failed: ${e.message}`);
+    trackError("login", e);
+    process.exit(1);
+});

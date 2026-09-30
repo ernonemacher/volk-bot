@@ -638,7 +638,19 @@ server.on("error", (e) => {
             console.error(
                 `Port ${PORT} is busy: the panel may already be open at http://localhost:${PORT}`,
             );
-            process.exit(1);
+            // Exit 0 when the holder is a live Volk supervisor: there is nothing
+            // to do, and under launchd a non-zero exit is relaunched every 10 s.
+            // Re-enabling the agent while a manual supervisor ran logged 1,650
+            // of these overnight. Anything else holding the port may let go, so
+            // that one is retried.
+            let holder = 0;
+            try {
+                holder = Number(readFileSync(PID_FILE, "utf8").trim());
+                process.kill(holder, 0);
+            } catch {
+                holder = 0;
+            }
+            process.exit(holder && holder !== process.pid ? 0 : 1);
         }
         push("sys", `[panel] port ${PORT} is busy, will retry`);
         return;
