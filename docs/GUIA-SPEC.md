@@ -4,21 +4,21 @@
 
 ## Objetivo e público
 
-O guia ensina um membro do clã a ler o painel do Volk e a confirmar bandeiras durante a partida, em menos de 5 minutos de leitura. Ele substitui a explicação boca a boca no canal de voz e é o link que se passa para quem pergunta "o que é esse mapa?".
+O guia ensina um membro do clã a marcar as bandeiras no painel do Volk durante a partida e a ler o mapa, em 2 minutos de leitura. Ele substitui a explicação boca a boca no canal de voz e é o link que se passa para quem pergunta "o que é esse mapa?".
 
 Três leitores, em ordem de prioridade:
 
 | Leitor | Quantos | O que precisa saber | Parte do guia |
 | --- | --- | --- | --- |
-| Membro | Quase todos | Ler o mapa: cores, números, porcentagens, linha branca | Posts 1 a 3 |
-| Operador (SL, quem chama objetivo) | Poucos por partida | Escolher servidor e time, confirmar bandeira, desfazer e recomeçar | Post 4 |
+| Operador (SL, quem chama objetivo) | Poucos por partida | Escolher servidor e time, marcar bandeira, desfazer e recomeçar | Posts 1 e 2 |
+| Membro | Quase todos | Ler o mapa: cores, números, porcentagens, linha branca | Posts 3 e 4 |
 | Admin do Discord | 1 a 3 pessoas | `/volk setup`, cargos, idioma, fixar servidor | Post à parte, fora do canal público |
 
 Critério de sucesso: um membro que nunca viu o painel, depois de ler, sabe dizer qual é a próxima bandeira provável e confirmar a que o time acabou de capturar, sem perguntar a ninguém.
 
 ## Formato no Discord
 
-O guia é uma sequência de 5 mensagens curtas num canal só de leitura, cada uma com um assunto e de 1 a 3 prints, mais uma mensagem de índice fixada no topo. Uma mensagem longa com 8 imagens empilhadas perde o leitor no segundo print.
+O guia é uma sequência de 5 mensagens curtas num canal só de leitura, cada uma com um assunto e 1 ou 2 prints, mais uma mensagem de índice fixada no topo. Uma mensagem longa com 8 imagens empilhadas perde o leitor no segundo print.
 
 Restrições que moldam o texto:
 
@@ -65,12 +65,12 @@ Formato de cada arquivo em `docs/guia/`: uma linha de cabeçalho com os prints d
 
 | Post | Título | Cobre | Prints |
 | --- | --- | --- | --- |
-| 0 | Índice | Uma linha por post, com link para a mensagem. Fixado. | nenhum |
-| 1 | O que é o Volk | Em RAAS e Invasion a lane é sorteada no início; nenhuma fonte pública diz quais bandeiras caíram, então o clã confirma à mão e o bot elimina as rotas impossíveis. Onde fica o painel. | P1 |
-| 2 | Lendo o mapa | Número dentro do círculo = profundidade a partir do seu main. Cores: verde cheio confirmada, vermelho cheio candidata à próxima, anel colorido possível mais adiante, sumiu = descartada. Porcentagem = chance naquela profundidade. Ponto duplo `2·3`. Linha branca só entre bandeiras vizinhas confirmadas. Seu main, onde a contagem começa, e as zonas tracejadas quando a layer tem. Borda escura fora da área jogável. Keypads de 300 m. | P2, P3, P10 |
-| 3 | Lendo o texto do painel | Os campos como aparecem em português: Times, Jogadores, Tempo de partida, A seguir, Rotas restantes, Lane, Bandeira N. | P4 |
-| 4 | Operando o painel | Servidor (estrela = fixado). Seu time: só em RAAS/RVAAS e só antes da primeira confirmação. Menu Bandeira N: candidatas mais prováveis primeiro, com keypad e %. Confirmação automática quando só sobra uma candidata. Botões Atualizar, Desfazer, Recomeçar, Abrir no SquadCalc. Troca de layer zera as bandeiras sozinha. | P5, P6, P7 |
-| 5 | Quando algo parece errado | Painel pausado (servidor offline ou em seed). Clique recusado durante atualização. Duas bandeiras com o mesmo nome: o keypad desempata. Painel sumiu: volta sozinho, senão um admin roda `/volk republish`. Limite: o bot não sabe tickets nem capturas. | P8, P9 |
+| 0 | Como usar o painel `{{painel}}` | O que o painel faz em uma frase, e os links agrupados em "Para operar" (1, 2) e "Para ler" (3, 4), mais o 5. Fixado. | nenhum |
+| 1 | Marcando as bandeiras | O painel não vê o jogo, então alguém marca. Quem pode (`{{operadores}}`). Servidor e Seu time no começo, Bandeira N a cada bandeira nova. Marca sozinho quando só sobra uma opção. | P5, P6 |
+| 2 | Botões | Desfazer, Recomeçar, Atualizar, Abrir no SquadCalc. Desfazer e Recomeçar só depois da primeira bandeira. Troca de layer zera sozinha. | P7 |
+| 3 | Lendo o mapa | Clicar para abrir em tamanho cheio. Legenda dos 6 números de P10. Pontos impossíveis somem a cada bandeira marcada. | P10 |
+| 4 | Lendo o texto do painel | Só os campos que não se explicam: Título, Lane, Rotas restantes, Bandeira N. Uma rota restante ainda pode ter mais de uma opção. | P4 |
+| 5 | Quando algo dá errado | Bandeira errada, painel pausado, clique durante atualização, sem cargo, sem menu de bandeira (AAS, TC, Destruction, TDM), nomes repetidos, bot fora do ar. | P8, P9 |
 | Admin | Configurando o Volk (canal da staff, só à mão) | `/volk setup` e permissões do canal, `republish`, `config`, `language`, `auto`, `search`, `pin`/`unpin`, `discovery` (global), `roles`. Sem convite: o bot já está no servidor. | nenhum ou P11 |
 
 A fonte de verdade do conteúdo é [USAGE.md](USAGE.md). Onde o guia e o painel divergirem, vale o texto que o painel mostra hoje em [locales/pt.json](../locales/pt.json).
@@ -105,9 +105,9 @@ Antes de confirmar qualquer bandeira no Discord, rode `node src/render-map.js <L
 | P9 | Aviso "Já estou atualizando" | Clique durante uma atualização | Escolher uma bandeira e clicar em Atualizar menos de 1 s depois |
 | P11 | Resposta de `/volk config` | Opcional, só para o post de admin | Captura da resposta |
 
-P2 e P3 são o par mais importante do guia: lado a lado, mostram o mapa encolhendo, que é a ideia inteira do bot. O ponto com duas profundidades (como `4·5`) costuma aparecer só no mapa sem confirmações, então a explicação dele aponta para P2.
+P1, P2 e P3 não são postados desde a revisão de 01/10 (ver Decisões), mas continuam aqui: P3 é a base de P10, e P1 é de onde saem os recortes P4 e P7.
 
-Ordem de captura, tudo na mesma partida: P5 primeiro (some na primeira confirmação), depois as 2 confirmações, P1, P4, P6 e P7, e por fim os renders P2 e P3 no computador. O texto dos posts 2 a 4 cita as bandeiras dos prints, então ele é escrito depois da captura.
+Ordem de captura, tudo na mesma partida: P5 primeiro (some na primeira confirmação), depois as 2 confirmações, P1, P4, P6 e P7, e por fim os renders P2 e P3 no computador.
 
 Regras para todos os prints:
 
@@ -121,9 +121,9 @@ Regras para todos os prints:
 
 ### Script do mapa anotado (P10)
 
-[annotate-map.mjs](../tools/annotate-map.mjs) recebe os mesmos argumentos de `render-map.js` (mais `--out=`), renderiza o mapa com `renderLayer` e desenha por cima, em SVG, um quadrado branco numerado ao lado de cada elemento que o post 2 explica, com uma linha preta até ele. A legenda dos números fica no texto do post, não na imagem, para a imagem não precisar de tradução.
+[annotate-map.mjs](../tools/annotate-map.mjs) recebe os mesmos argumentos de `render-map.js` (mais `--out=`), renderiza o mapa com `renderLayer` e desenha por cima, em SVG, um quadrado branco numerado ao lado de cada elemento que o post 3 explica, com uma linha preta até ele. A legenda dos números fica no texto do post, não na imagem, para a imagem não precisar de tradução.
 
-Marcações, na ordem em que o post 2 as explica:
+Marcações, na ordem em que o post 3 as explica:
 
 1. A primeira bandeira confirmada (verde cheio)
 2. A candidata mais provável à próxima (vermelho cheio)
@@ -161,17 +161,17 @@ Feita no servidor de teste com FEB #2 em Narva_RAAS_v1, Time 1 (WPMC), lane Aban
 
 O que a captura mostrou e muda o texto do guia:
 
-- **O mapa aparece pequeno no Discord.** O Discord serve o anexo com 640 px (o original tem 1716) e o mostra com cerca de 350 px numa janela de notebook, onde nomes e porcentagens ficam ilegíveis. O post 2 precisa dizer para clicar no mapa e abrir em tamanho cheio, e explicar a legenda com P3, não com P1.
+- **O mapa aparece pequeno no Discord.** O Discord serve o anexo com 640 px (o original tem 1716) e o mostra com cerca de 350 px numa janela de notebook, onde nomes e porcentagens ficam ilegíveis. O post do mapa precisa dizer para clicar no mapa e abrir em tamanho cheio, e explicar a legenda com P3, não com P1.
 - **O Discord dos prints está em inglês** ("Today at", "(edited)", "Only you can see this"). Quem usa o Discord em português vê esses textos traduzidos; o guia não cita nenhum deles.
 - **O menu mostra keypad, não o código da bandeira.** Shanty Marina aparece como `D5`, enquanto o render e o código a chamam de `B2`. O guia só usa nome e keypad.
 
 ## Tom, idioma e vocabulário
 
-- Português do Brasil, segunda pessoa ("você confirma"), frases curtas.
-- Vocabulário que o clã já usa em jogo: bandeira, lane, main, SL, keypad, seed. Sem termos do código: nada de "cluster", "solver" ou "profundidade". A posição na lane é explicada como "o número dentro da bandeira"; "Rotas restantes" aparece porque é o rótulo do painel, explicado como traçados possíveis.
+- Português do Brasil, segunda pessoa ("você marca"), frases curtas.
+- Vocabulário que o clã já usa em jogo: bandeira, lane, main, SL, keypad, seed. Sem termos do código: nada de "cluster", "solver" ou "profundidade". A posição na lane é explicada como "o número dentro da bandeira"; "Rotas restantes" aparece porque é o rótulo do painel, explicado como caminhos possíveis.
 - Nomes de botões e menus escritos exatamente como o painel mostra em português: Bandeira N (e não "Objetivo N", como está no USAGE.md em inglês), Seu time, Atualizar, Desfazer, Recomeçar, Abrir no SquadCalc.
 - Nenhum travessão longo no texto.
-- Cada post abre dizendo o que o leitor vai conseguir fazer, não o que o post contém.
+- Sem frase de abertura dizendo o que o post ensina: o título já diz, e ela só alongava o texto.
 
 ## Fora de escopo e decisões
 
@@ -187,4 +187,11 @@ Decisões tomadas em 29/09:
 - Post de admin: canal da staff, publicado à mão.
 - Acentos de `warn.notAllowed` e `warn.noPanel` em [locales/pt.json](../locales/pt.json) corrigidos antes das capturas.
 
-Perguntas em aberto: nenhuma. O post 4 cita o cargo de operador pelo marcador `{{operadores}}` (decidido em 29/09).
+Revisão de 01/10, depois de ler o guia postado: estava longo, complexo para quem chega e explicava pouco a operação, que é o que mais importa.
+
+- Mantidos 5 posts e o índice, cada um com cerca de metade do texto (de ~5.900 para ~3.200 caracteres) e de 10 para 7 prints.
+- Operar vem antes de ler: o post "O que é o Volk" saiu, e o que ele explicava cabe em uma frase do índice e outra do post 1.
+- O título "Volk: qual é a próxima bandeira" saiu. O canal do painel (`{{painel}}`) vai no título do índice e no post 1, então cada servidor vê o próprio canal; por isso o `/volk guide` recusa um servidor sem `/volk setup`.
+- "Marcar" no lugar de "confirmar": é o que o membro faz no menu.
+
+Perguntas em aberto: nenhuma. O post 1 cita o cargo de operador pelo marcador `{{operadores}}` (decidido em 29/09).

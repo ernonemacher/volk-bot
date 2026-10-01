@@ -1,12 +1,14 @@
 <!-- prints: nenhum. Postado por último e fixado. Cada {{NN}} vira o link da mensagem do post NN (botão direito na mensagem > Copiar link da mensagem). -->
 
-## Guia do Volk
-O Volk mostra no Discord qual bandeira pode vir a seguir em RAAS e Invasion. Leva 5 minutos para ler tudo.
+## Como usar o painel {{painel}}
+O painel mostra quais bandeiras podem vir a seguir na partida e a chance de cada uma. Serve para RAAS e Invasion, onde a ordem das bandeiras é sorteada. Leva 2 minutos para ler.
 
-1. [O que é o Volk]({{01}})
-2. [Lendo o mapa]({{02}})
-3. [Lendo o texto do painel]({{03}})
-4. [Operando o painel]({{04}})
-5. [Quando algo parece errado]({{05}})
+**Para operar**
+1. [Marcando as bandeiras]({{01}})
+2. [Botões]({{02}})
 
-**Painel:** {{painel}}
+**Para ler**
+3. [O mapa]({{03}})
+4. [O texto]({{04}})
+
+5. [Quando algo dá errado]({{05}})

@@ -363,6 +363,9 @@ export async function handleCommand(i, repaint) {
         if (!channel?.isTextBased?.()) {
             return i.reply(ephemeral("Pick a text channel."));
         }
+        if (!cfg.channelId) {
+            return i.reply(ephemeral("Bind the panel with `/volk setup` first: the guide points members to its channel."));
+        }
         if (channel.id === cfg.channelId) {
             return i.reply(ephemeral(GUIDE_BESIDE_PANEL));
         }
