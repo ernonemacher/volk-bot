@@ -96,7 +96,7 @@ when the server changes layer, because a new match means a new route.
 Invite the bot with **both** the `bot` and `applications.commands` scopes:
 
 ```
-https://discord.com/oauth2/authorize?client_id=<application id>&permissions=125952&scope=bot+applications.commands
+https://discord.com/oauth2/authorize?client_id=<application id>&permissions=2251799813811200&scope=bot+applications.commands
 ```
 
 Without the `bot` scope the authorisation still reports success, but no bot
@@ -125,7 +125,7 @@ not share anything except which servers are currently in a match.
 | `/volk discovery` | Include servers currently in a match, with a minimum player count |
 | `/volk search` | Find a server id by name |
 | `/volk republish` | Post the panel again, for when it was deleted or got stuck |
-| `/volk guide` | Post the Portuguese usage guide from `docs/guia/` in a channel other than the panel's, pin its index, and replace the previous copy |
+| `/volk guide` | Post the Portuguese usage guide from `docs/guia/` in a channel other than the panel's, pin its index (when the bot has Pin Messages there), and replace the previous copy |
 
 Commands work from any channel, so configuring does not clutter the panel.
 

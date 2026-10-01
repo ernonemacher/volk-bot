@@ -54,7 +54,7 @@ difference between it and `npm start` in a terminal that later gets closed:
 that leaves an orphan holding the gateway with its logs going nowhere.
 
 Invite the bot with **both** the `bot` and `applications.commands` scopes
-(`permissions=125952`). With only `applications.commands` the install reports
+(`permissions=2251799813811200`). With only `applications.commands` the install reports
 success and does nothing. Then, in each server:
 
 ```

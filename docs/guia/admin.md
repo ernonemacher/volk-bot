@@ -6,7 +6,7 @@ Comandos para quem tem Gerenciar Servidor ou o cargo de admin do Volk. Funcionam
 **Painel**
 - `/volk setup channel:#canal`: define o canal do painel. O canal precisa de Ver canais, Enviar mensagens, Inserir links, Anexar arquivos, Ver histórico de mensagens e Gerenciar mensagens; se faltar algo, o comando diz o quê.
 - `/volk republish`: apaga e posta o painel de novo, para quando ele travar ou for apagado.
-- `/volk guide channel:#canal`: posta este guia no canal (nunca o do painel), fixa o índice e apaga a versão anterior.
+- `/volk guide channel:#canal`: posta este guia no canal (nunca o do painel), fixa o índice e apaga a versão anterior. Sem Fixar mensagens no canal, posta mesmo assim e avisa que o índice ficou sem fixar.
 - `/volk config`: mostra a configuração inteira e os servidores do menu.
 - `/volk language code:pt`: idioma do painel (de, en, fr, pt, ru, uk, zh).
 - `/volk auto active:true interval:60`: atualização automática, de 30 a 3600 segundos.

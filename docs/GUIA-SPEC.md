@@ -50,7 +50,7 @@ Comportamento de `/volk guide` ([commands.js](../src/commands.js)):
 
 - Só admin (mesmo nível de `/volk setup`).
 - Opção `channel`, padrão o canal atual, no mesmo padrão dos outros subcomandos. Recusa o canal do painel, pelo motivo acima; o `/volk setup` recusa, pelo mesmo motivo, o canal do guia.
-- Verifica antes de postar as permissões View Channel, Send Messages, Attach Files, Read Message History e Pin Messages, e nomeia a que falta, como o `/volk setup` já faz.
+- Verifica antes de postar as permissões View Channel, Send Messages, Attach Files e Read Message History, e nomeia a que falta, como o `/volk setup` já faz. Pin Messages é opcional: o Discord a separou de Manage Messages e quem posta o guia muitas vezes não pode concedê-la, então sem ela o guia sai sem o índice fixado e a resposta diz isso.
 - Carrega e valida os arquivos antes de tocar no canal: um post acima de 2000 caracteres falha sem apagar o guia que já existe.
 - Posta os posts 01 a 05 em ordem, cada um com seus prints como anexos soltos, e por último o índice com os links das mensagens. Fixa o índice.
 - Tudo ou nada: se um envio falha no meio, apaga o que já tinha postado e mantém o guia anterior.

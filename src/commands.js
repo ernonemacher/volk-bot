@@ -218,14 +218,18 @@ const NEEDED = {
     ManageMessages: "Manage Messages",
 };
 
-/** The guide is posted once and pinned, never edited, so it needs less. */
+/**
+ * The guide is posted once, never edited, so it needs less. Pinning the index
+ * is best effort: Discord split Pin Messages out of Manage Messages, and the
+ * person posting the guide often cannot grant it.
+ */
 const GUIDE_NEEDED = {
     ViewChannel: "View Channel",
     SendMessages: "Send Messages",
     AttachFiles: "Attach Files",
     ReadMessageHistory: "Read Message History",
-    PinMessages: "Pin Messages",
 };
+const GUIDE_PIN = { PinMessages: "Pin Messages" };
 
 function missingPermissions(i, channel, needed = NEEDED) {
     const me = i.guild?.members?.me;
@@ -371,6 +375,7 @@ export async function handleCommand(i, repaint) {
                 ),
             );
         }
+        const canPin = !missingPermissions(i, channel, GUIDE_PIN).length;
 
         await i.deferReply({ flags: MessageFlags.Ephemeral });
         // Loaded before anything is sent or deleted: a broken file must not
@@ -391,7 +396,7 @@ export async function handleCommand(i, repaint) {
             const urls = Object.fromEntries(sent.map(([id, m]) => [id, m.url]));
             const top = await channel.send({ content: linkIndex(index.text, urls), ...quiet });
             sent.push([index.id, top]);
-            await top.pin();
+            if (canPin) await top.pin();
         } catch (e) {
             // All or nothing: half a guide would not be recorded, so the next
             // run could not clean it up.
@@ -409,7 +414,14 @@ export async function handleCommand(i, repaint) {
 
         cfg.guide = { channelId: channel.id, messageIds: sent.map(([, m]) => m.id) };
         await save("guide");
-        return i.editReply(`Guide posted in <#${channel.id}>, index pinned: ${sent.at(-1)[1].url}`);
+        const url = sent.at(-1)[1].url;
+        return i.editReply(
+            canPin
+                ? `Guide posted in <#${channel.id}>, index pinned: ${url}`
+                : `Guide posted in <#${channel.id}>: ${url}\n` +
+                      "The index is **not pinned**: I am missing **Pin Messages** there. " +
+                      "Pin it by hand, or grant that and run the command again.",
+        );
     }
 
     if (sub === "config") {
